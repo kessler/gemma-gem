@@ -1,0 +1,205 @@
+import type { Message } from '@/shared/messages'
+import type { ToolCall, ToolResponse } from '@/agent/types'
+import { TOOL_DEFINITIONS } from '@/shared/tool-definitions'
+import { AgentLoop } from '@/agent/agent-loop'
+import { GemmaModelHost } from '@/offscreen/model-host'
+import { log } from '@/shared/logger'
+
+// ===== WebGPU Diagnostic (run via message: { type: 'webgpu:diagnose' }) =====
+async function runWebGPUDiagnostic() {
+  const hasGPU = 'gpu' in navigator
+  log.info('navigator.gpu exists:', hasGPU)
+  if (!hasGPU) {
+    log.error('navigator.gpu NOT available in offscreen document')
+    return false
+  }
+  try {
+    const adapter = await navigator.gpu.requestAdapter()
+    if (!adapter) {
+      log.error('navigator.gpu.requestAdapter() returned null')
+      return false
+    }
+    log.info('WebGPU adapter:', {
+      vendor: adapter.info?.vendor,
+      architecture: adapter.info?.architecture,
+      device: adapter.info?.device,
+    })
+    const device = await adapter.requestDevice()
+    log.info('WebGPU device created successfully')
+    device.destroy()
+    return true
+  } catch (e) {
+    log.error('WebGPU init failed:', e)
+    return false
+  }
+}
+
+log.info('Offscreen document initializing')
+
+// Model host — auto-load on startup
+const modelHost = new GemmaModelHost((status, progress, error) => {
+  chrome.runtime.sendMessage({
+    type: 'model:status',
+    status,
+    progress,
+    error,
+  } satisfies Message)
+})
+
+// Pending tool results keyed by requestId
+const pendingToolResults = new Map<string, (result: unknown) => void>()
+let requestIdCounter = 0
+
+function createToolExecutor(tabId: number) {
+  return {
+    async execute(call: ToolCall): Promise<ToolResponse> {
+      const requestId = `tool_${++requestIdCounter}`
+      log.info('Executing tool:', call.name, JSON.stringify(call.arguments))
+
+      const resultPromise = new Promise<unknown>((resolve) => {
+        pendingToolResults.set(requestId, resolve)
+      })
+
+      chrome.runtime.sendMessage({
+        type: 'tool:execute',
+        tabId,
+        requestId,
+        call,
+      } satisfies Message)
+
+      const result = await resultPromise
+      log.debug('Tool result:', call.name, JSON.stringify(result).slice(0, 200))
+      return { name: call.name, result }
+    },
+  }
+}
+
+// Agent loop instance per tab
+let currentAgent: AgentLoop | null = null
+let currentTabId: number | null = null
+
+// Auto-load model immediately — avoids race condition where model:load
+// message arrives before this listener is registered
+log.info('Auto-loading model')
+modelHost.load().catch(e => log.error('Model load failed:', e))
+
+chrome.runtime.onMessage.addListener((message: Message) => {
+  switch (message.type) {
+    case 'model:load': {
+      // Idempotent — load() guards against double-load
+      modelHost.load().catch(e => log.error('Model load failed:', e))
+      break
+    }
+
+    case 'webgpu:diagnose' as Message['type']: {
+      runWebGPUDiagnostic().then(ok => {
+        log.info('WebGPU diagnostic result:', ok)
+      })
+      break
+    }
+
+    case 'settings:update': {
+      const { settings } = message
+      log.info('Settings updated:', settings)
+      if (currentAgent) {
+        currentAgent.updateOptions({
+          enableThinking: settings.thinking,
+          maxIterations: settings.maxIterations,
+        })
+      }
+      break
+    }
+
+    case 'context:clear': {
+      log.info('Context cleared')
+      if (currentAgent) {
+        currentAgent.clearHistory()
+      }
+      break
+    }
+
+    case 'agent:run': {
+      if (!modelHost.isLoaded()) {
+        chrome.runtime.sendMessage({
+          type: 'agent:response',
+          tabId: message.tabId,
+          text: 'Model is still loading. Please wait...',
+        } satisfies Message)
+        return
+      }
+
+      const { tabId, userMessage, settings } = message
+      log.info('Agent run, tab:', tabId, 'message:', userMessage.slice(0, 80))
+
+      const enableThinking = settings?.thinking ?? true
+      const maxIterations = settings?.maxIterations ?? 10
+
+      if (currentTabId !== tabId || !currentAgent) {
+        log.info('Creating new agent loop for tab', tabId)
+        currentAgent = new AgentLoop({
+          model: modelHost,
+          tools: TOOL_DEFINITIONS,
+          executor: createToolExecutor(tabId),
+          systemPrompt: `You are Gemma Gem, a browser assistant running inside a Chrome extension on the user's current webpage. You have tools to interact with the page: read_page_content, take_screenshot, click_element, type_text, scroll_page, and run_javascript. When the user asks about page content or wants to interact with the page, use your tools — you cannot see the page without them. Be concise.`,
+          maxIterations,
+          enableThinking,
+          onThinking(text) {
+            log.debug('Thinking:', text.slice(0, 100))
+            chrome.runtime.sendMessage({
+              type: 'agent:chunk',
+              tabId,
+              text: `[Thinking] ${text}`,
+            } satisfies Message)
+          },
+          onToolCall(call) {
+            log.info('Tool call:', call.name, JSON.stringify(call.arguments))
+            chrome.runtime.sendMessage({
+              type: 'agent:chunk',
+              tabId,
+              text: `[Tool] ${call.name}(${JSON.stringify(call.arguments)})`,
+            } satisfies Message)
+          },
+          onChunk(text) {
+            chrome.runtime.sendMessage({
+              type: 'agent:chunk',
+              tabId,
+              text,
+            } satisfies Message)
+          },
+        })
+        currentTabId = tabId
+      }
+
+      currentAgent.run(userMessage).then((result) => {
+        log.info('Agent done. Iterations:', result.iterations, 'Tool calls:', result.toolCallCount)
+        log.debug('Response:', result.response.slice(0, 200))
+        chrome.runtime.sendMessage({
+          type: 'agent:response',
+          tabId,
+          text: result.response,
+        } satisfies Message)
+      }).catch((err) => {
+        log.error('Agent error:', err)
+        chrome.runtime.sendMessage({
+          type: 'agent:response',
+          tabId,
+          text: `Error: ${err}`,
+        } satisfies Message)
+      })
+
+      break
+    }
+
+    case 'tool:result': {
+      log.debug('Tool result received:', message.requestId)
+      const resolve = pendingToolResults.get(message.requestId)
+      if (resolve) {
+        resolve(message.result)
+        pendingToolResults.delete(message.requestId)
+      }
+      break
+    }
+  }
+})
+
+log.info('Offscreen document ready')

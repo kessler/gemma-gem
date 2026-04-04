@@ -1,0 +1,26 @@
+{
+  "name": "gemma-gem",
+  "description": "Browser AI agent powered by Gemma 4 via WebGPU",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build --mode development",
+    "build:prod": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "postinstall": "wxt prepare"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wxt": "^0.20.20"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.0.1",
+    "marked": "^17.0.5"
+  }
+}
