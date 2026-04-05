@@ -5,6 +5,32 @@ import { AgentLoop } from '@/agent/agent-loop'
 import { GemmaModelHost } from '@/offscreen/model-host'
 import { log } from '@/shared/logger'
 
+function getCountry(): string {
+  const locale = navigator.language || 'en-US'
+  const region = locale.split('-')[1]
+  if (!region) return 'unknown'
+  const displayNames = new Intl.DisplayNames([locale], { type: 'region' })
+  return displayNames.of(region) ?? 'unknown'
+}
+
+function buildSystemPrompt(): string {
+  const now = new Date()
+  const date = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  const country = getCountry()
+
+  return [
+    `date: ${date}`,
+    `time: ${time}`,
+    `location: ${country}`,
+    '',
+    'You are Gemma Gem, a browser assistant running inside a Chrome extension.',
+    'Tools available to you: read_page_content, take_screenshot, click_element, type_text, scroll_page, run_javascript',
+    'ALWAYS consider using these tools to answer the user\'s query',
+    'Be concise',
+  ].join('\n')
+}
+
 // ===== WebGPU Diagnostic (run via message: { type: 'webgpu:diagnose' }) =====
 async function runWebGPUDiagnostic() {
   const hasGPU = 'gpu' in navigator
@@ -140,11 +166,10 @@ chrome.runtime.onMessage.addListener((message: Message) => {
           model: modelHost,
           tools: TOOL_DEFINITIONS,
           executor: createToolExecutor(tabId),
-          systemPrompt: `You are Gemma Gem, a browser assistant running inside a Chrome extension on the user's current webpage. You have tools to interact with the page: read_page_content, take_screenshot, click_element, type_text, scroll_page, and run_javascript. When the user asks about page content or wants to interact with the page, use your tools — you cannot see the page without them. Be concise.`,
+          systemPrompt: buildSystemPrompt(),
           maxIterations,
           enableThinking,
-          onThinking(text) {
-            log.debug('Thinking:', text.slice(0, 100))
+          onThinkingChunk(text) {
             chrome.runtime.sendMessage({
               type: 'agent:chunk',
               tabId,
@@ -180,10 +205,11 @@ chrome.runtime.onMessage.addListener((message: Message) => {
         } satisfies Message)
       }).catch((err) => {
         log.error('Agent error:', err)
+        const message = err instanceof Error ? err.message : String(err)
         chrome.runtime.sendMessage({
           type: 'agent:response',
           tabId,
-          text: `Error: ${err}`,
+          text: `Something went wrong: ${message}`,
         } satisfies Message)
       })
 

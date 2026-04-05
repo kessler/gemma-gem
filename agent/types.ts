@@ -31,6 +31,7 @@ export interface ToolExecutor {
 export interface GenerateOptions {
   maxTokens?: number
   onChunk?: (text: string) => void
+  onThinkingChunk?: (text: string) => void
   imageDataUrl?: string
 }
 
@@ -56,6 +57,7 @@ export interface AgentLoopOptions {
   maxIterations?: number
   enableThinking?: boolean
   onThinking?: (text: string) => void
+  onThinkingChunk?: (text: string) => void
   onToolCall?: (call: ToolCall) => void
   onToolResponse?: (resp: ToolResponse) => void
   onChunk?: (text: string) => void

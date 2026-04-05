@@ -8,6 +8,27 @@ import {
 import type { ModelBackend, GenerateOptions } from '@/agent/types'
 import { log } from '@/shared/logger'
 
+const SPECIAL_TOKENS = new Set([
+  '<eos>', '<bos>', '<end_of_turn>', '<start_of_turn>',
+  '<|turn>', '<turn|>',
+  '<|tool>', '<tool|>',
+  '<|tool_call>', '<tool_call|>',
+  '<|tool_response>', '<tool_response|>',
+  '<|channel>', '<channel|>',
+  '<|think|>', '<|image|>',
+  '<|"|>',
+])
+
+function stripSpecialTokens(text: string): string {
+  let result = text
+  for (const token of SPECIAL_TOKENS) {
+    if (result.includes(token)) {
+      result = result.split(token).join('')
+    }
+  }
+  return result
+}
+
 // Configure ONNX Runtime to load backend files locally instead of from CDN
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('ort/')
 
@@ -99,6 +120,8 @@ export class GemmaModelHost implements ModelBackend {
 
     log.debug('Step 2: creating streamer')
     let rawResult = ''
+    let insideThinking = false
+    let insideToolCall = false
     let streamer: InstanceType<typeof TextStreamer>
     try {
       streamer = new TextStreamer(this.processor.tokenizer, {
@@ -106,7 +129,31 @@ export class GemmaModelHost implements ModelBackend {
         skip_special_tokens: false,
         callback_function: (text: string) => {
           rawResult += text
-          const clean = text.replace(/<\|[^>]*\|>/g, '').replace(/<[^|>]*\|>/g, '')
+
+          // Track thinking blocks
+          if (text.includes('<|channel>')) {
+            insideThinking = true
+            return
+          }
+          if (text.includes('<channel|>')) {
+            insideThinking = false
+            return
+          }
+          if (insideThinking) {
+            const clean = text.replace(/^thought\n?/, '')
+            if (clean) options?.onThinkingChunk?.(clean)
+            return
+          }
+
+          // Track tool call blocks
+          if (text.includes('<|tool_call>')) insideToolCall = true
+          if (text.includes('<tool_call|>') || text.includes('<tool_response|>')) {
+            insideToolCall = false
+            return
+          }
+          if (insideToolCall || text.includes('<|tool_response>')) return
+
+          const clean = stripSpecialTokens(text)
           if (clean) options?.onChunk?.(clean)
         },
       })

@@ -1,6 +1,6 @@
 import type { ToolCall, ToolResponse } from '../agent/types'
 
-const MAX_CONTENT_LENGTH = 8000
+const MAX_CONTENT_LENGTH = 64000
 
 function readPageContent(args: Record<string, unknown>): ToolResponse {
   const selector = (args.selector as string) || 'body'
@@ -59,11 +59,15 @@ function scrollPage(args: Record<string, unknown>): ToolResponse {
 }
 
 export function executeContentTool(call: ToolCall): ToolResponse | null {
-  switch (call.name) {
-    case 'read_page_content': return readPageContent(call.arguments)
-    case 'click_element': return clickElement(call.arguments)
-    case 'type_text': return typeText(call.arguments)
-    case 'scroll_page': return scrollPage(call.arguments)
-    default: return null
+  try {
+    switch (call.name) {
+      case 'read_page_content': return readPageContent(call.arguments)
+      case 'click_element': return clickElement(call.arguments)
+      case 'type_text': return typeText(call.arguments)
+      case 'scroll_page': return scrollPage(call.arguments)
+      default: return null
+    }
+  } catch (e) {
+    return { name: call.name, result: { error: `Tool ${call.name} failed: ${e instanceof Error ? e.message : e}` } }
   }
 }

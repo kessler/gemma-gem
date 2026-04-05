@@ -58,38 +58,43 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
       const { tabId, call, requestId } = message
       log.info('tool:execute', call.name, JSON.stringify(call.arguments))
 
-      if (call.name === 'take_screenshot') {
-        const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' })
-        log.debug('screenshot captured', dataUrl.length, 'bytes')
-        sendToRuntime({ type: 'tool:result', requestId, result: { screenshot: dataUrl } })
-        return
-      }
-
-      if (call.name === 'run_javascript') {
-        const code = call.arguments.code
-        if (!code || typeof code !== 'string') {
-          sendToRuntime({ type: 'tool:result', requestId, result: { error: 'No code provided' } })
+      try {
+        if (call.name === 'take_screenshot') {
+          const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'png' })
+          log.debug('screenshot captured', dataUrl.length, 'bytes')
+          sendToRuntime({ type: 'tool:result', requestId, result: { screenshot: dataUrl } })
           return
         }
-        log.debug('executing JS in tab', tabId)
-        const results = await chrome.scripting.executeScript({
-          target: { tabId },
-          world: 'MAIN',
-          func: (code: string) => {
-            try {
-              const result = new Function(code)()
-              return { value: String(result) }
-            } catch (e) {
-              return { error: String(e) }
-            }
-          },
-          args: [call.arguments.code as string],
-        })
-        sendToRuntime({ type: 'tool:result', requestId, result: results[0]?.result ?? { error: 'No result' } })
-        return
-      }
 
-      sendToTab(tabId, { type: 'agent:tool_call', requestId, call })
+        if (call.name === 'run_javascript') {
+          const code = call.arguments.code
+          if (!code || typeof code !== 'string') {
+            sendToRuntime({ type: 'tool:result', requestId, result: { error: 'No code provided' } })
+            return
+          }
+          log.debug('executing JS in tab', tabId)
+          const results = await chrome.scripting.executeScript({
+            target: { tabId },
+            world: 'MAIN',
+            func: (code: string) => {
+              try {
+                const result = new Function(code)()
+                return { value: String(result) }
+              } catch (e) {
+                return { error: String(e) }
+              }
+            },
+            args: [call.arguments.code as string],
+          })
+          sendToRuntime({ type: 'tool:result', requestId, result: results[0]?.result ?? { error: 'No result' } })
+          return
+        }
+
+        sendToTab(tabId, { type: 'agent:tool_call', requestId, call })
+      } catch (e) {
+        log.error('tool:execute failed:', call.name, e)
+        sendToRuntime({ type: 'tool:result', requestId, result: { error: `Tool ${call.name} failed: ${e}` } })
+      }
       return
     }
 

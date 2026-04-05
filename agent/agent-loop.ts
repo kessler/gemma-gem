@@ -42,6 +42,7 @@ export class AgentLoop {
       let output = await model.generate(prompt, {
         maxTokens: DEFAULT_MAX_TOKENS,
         onChunk: this.options.onChunk,
+        onThinkingChunk: this.options.onThinkingChunk,
         imageDataUrl: pendingImageDataUrl,
       })
 
@@ -57,6 +58,7 @@ export class AgentLoop {
           const continuation = await model.generate(fullPrompt, {
             maxTokens: remaining,
             onChunk: this.options.onChunk,
+            onThinkingChunk: this.options.onThinkingChunk,
           })
           output += continuation
         } else {
@@ -71,6 +73,7 @@ export class AgentLoop {
             const continuation = await model.generate(strippedPrompt, {
               maxTokens: strippedRemaining,
               onChunk: this.options.onChunk,
+              onThinkingChunk: this.options.onThinkingChunk,
             })
             output = stripped + continuation
           } else {
@@ -82,11 +85,8 @@ export class AgentLoop {
 
       log.debug('Raw model output:', JSON.stringify(output.slice(0, 500)))
 
-      // Extract thinking if present
-      const { thinking, rest } = extractThinking(output)
-      if (thinking && this.options.onThinking) {
-        this.options.onThinking(thinking)
-      }
+      // Extract thinking to get clean output for tool parsing
+      const { rest } = extractThinking(output)
 
       // Check for tool calls
       if (!hasToolCalls(rest)) {

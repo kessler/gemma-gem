@@ -93,20 +93,21 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener((message: Message) => {
       switch (message.type) {
         case 'agent:response':
-          chat.addMessage(message.text, 'agent')
+          chat.finalizeThinkingStream()
+          chat.finalizeStream(message.text)
           chat.setInputEnabled(true)
           break
 
         case 'agent:chunk':
           if (message.text.startsWith('[Tool]')) {
+            chat.finalizeThinkingStream()
             chat.addMessage(message.text, 'tool')
           } else if (message.text.startsWith('[Thinking]')) {
-            chat.addMessage(message.text, 'thinking')
+            chat.appendThinkingStream(message.text.replace(/^\[Thinking\]\s*/, ''))
+          } else {
+            chat.finalizeThinkingStream()
+            chat.appendStream(message.text)
           }
-          break
-
-        case 'agent:thinking':
-          chat.addMessage(message.text, 'thinking')
           break
 
         case 'agent:tool_call':

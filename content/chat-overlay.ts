@@ -159,9 +159,25 @@ const STYLES = `
   .message-thinking {
     align-self: flex-start; background: rgba(251, 191, 36, 0.1);
     border: 1px solid rgba(251, 191, 36, 0.15); font-size: 12px; color: #fbbf24; font-style: italic;
+    cursor: pointer; user-select: none;
   }
-  .message-thinking summary { cursor: pointer; user-select: none; }
-  .message-thinking .thinking-content { margin-top: 4px; white-space: normal; }
+  .thinking-header {
+    font-weight: 600; margin-bottom: 4px;
+  }
+  .thinking-body {
+    position: relative; overflow: hidden; transition: max-height 0.3s ease;
+  }
+  .thinking-body.collapsed {
+    max-height: 3.6em;
+    -webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+  }
+  .thinking-body.expanded {
+    max-height: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .message-thinking .thinking-content { white-space: normal; }
   .message-thinking .thinking-content p { margin: 0 0 8px 0; }
   .message-thinking .thinking-content p:last-child { margin-bottom: 0; }
   .message-thinking .thinking-content code {
@@ -235,6 +251,10 @@ export class ChatOverlay {
   private thinkingTag: HTMLElement
   private iterationsTag: HTMLElement
   private typingEl: HTMLElement | null = null
+  private streamEl: HTMLElement | null = null
+  private streamText = ''
+  private thinkingStreamEl: HTMLElement | null = null
+  private thinkingStreamText = ''
   private visible = false
   settings: ChatSettings = { ...DEFAULT_SETTINGS }
 
@@ -399,6 +419,74 @@ export class ChatOverlay {
     this.container.style.display = 'none'
   }
 
+  appendStream(text: string): void {
+    this.hideTyping()
+    this.streamText += text
+
+    if (!this.streamText.trim()) return
+
+    if (!this.streamEl) {
+      this.streamEl = document.createElement('div')
+      this.streamEl.className = 'message message-agent'
+      if (this.typingEl) {
+        this.messagesEl.insertBefore(this.streamEl, this.typingEl)
+      } else {
+        this.messagesEl.appendChild(this.streamEl)
+      }
+    }
+
+    this.streamEl.textContent = this.streamText
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight
+  }
+
+  finalizeStream(fullText: string): void {
+    if (!this.streamEl) {
+      this.addMessage(fullText, 'agent')
+      return
+    }
+    this.streamEl.innerHTML = marked.parse(fullText) as string
+    this.streamEl = null
+    this.streamText = ''
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight
+  }
+
+  appendThinkingStream(text: string): void {
+    this.hideTyping()
+
+    if (!this.thinkingStreamEl) {
+      const msg = document.createElement('div')
+      msg.className = 'message message-thinking'
+      const header = document.createElement('div')
+      header.className = 'thinking-header'
+      header.textContent = 'Thinking...'
+      const body = document.createElement('div')
+      body.className = 'thinking-body collapsed'
+      const content = document.createElement('div')
+      content.className = 'thinking-content'
+      body.appendChild(content)
+      msg.appendChild(header)
+      msg.appendChild(body)
+      msg.addEventListener('click', () => {
+        body.classList.toggle('collapsed')
+        body.classList.toggle('expanded')
+      })
+      this.messagesEl.appendChild(msg)
+      this.thinkingStreamEl = content
+    }
+
+    this.thinkingStreamText += text
+    this.thinkingStreamEl.textContent = this.thinkingStreamText
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight
+  }
+
+  finalizeThinkingStream(): void {
+    if (this.thinkingStreamEl) {
+      this.thinkingStreamEl.innerHTML = marked.parse(this.thinkingStreamText) as string
+      this.thinkingStreamEl = null
+      this.thinkingStreamText = ''
+    }
+  }
+
   addMessage(text: string, type: 'user' | 'agent' | 'tool' | 'thinking'): void {
     if (type === 'user' || type === 'agent') {
       this.hideTyping()
@@ -409,15 +497,21 @@ export class ChatOverlay {
     if (type === 'agent') {
       msg.innerHTML = marked.parse(text) as string
     } else if (type === 'thinking') {
-      const details = document.createElement('details')
-      const summary = document.createElement('summary')
-      summary.textContent = 'Thinking...'
+      const header = document.createElement('div')
+      header.className = 'thinking-header'
+      header.textContent = 'Thinking...'
+      const body = document.createElement('div')
+      body.className = 'thinking-body collapsed'
       const content = document.createElement('div')
       content.className = 'thinking-content'
       content.innerHTML = marked.parse(text.replace(/^\[Thinking\]\s*/, '')) as string
-      details.appendChild(summary)
-      details.appendChild(content)
-      msg.appendChild(details)
+      body.appendChild(content)
+      msg.appendChild(header)
+      msg.appendChild(body)
+      msg.addEventListener('click', () => {
+        body.classList.toggle('collapsed')
+        body.classList.toggle('expanded')
+      })
     } else {
       msg.textContent = text
     }

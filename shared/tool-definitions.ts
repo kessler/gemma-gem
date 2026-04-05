@@ -76,7 +76,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'run_javascript',
-    description: 'Execute JavaScript code in the page context and return the result',
+    description: 'Execute JavaScript in the page context with full DOM access (document, window, etc.). Write code that reads from the DOM directly.',
     parameters: {
       type: 'object',
       properties: {
