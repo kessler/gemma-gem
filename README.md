@@ -1,5 +1,7 @@
 # Gemma Gem
 
+![Gemma Gem in action](screenshot.png)
+
 Your personal AI assistant living right inside the browser. Gemma Gem runs Google's Gemma 4 model entirely on-device via WebGPU — no API keys, no cloud, no data leaving your machine. It can read pages, click buttons, fill forms, run JavaScript, and answer questions about any site you visit.
 
 ## Requirements
