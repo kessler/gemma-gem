@@ -7,6 +7,18 @@ import type { ToolCall } from '@/agent/types'
 import { MODELS, STORAGE_KEY_MODEL, DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
 
 const STORAGE_KEY = 'gemma_disabled_sites'
+const PAGE_SNAPSHOT_MAX_LENGTH = 8000
+
+function capturePageSnapshot(): string {
+  const title = document.title
+  const url = location.href
+  const body = document.body?.innerText ?? ''
+  const truncated = body.length > PAGE_SNAPSHOT_MAX_LENGTH
+    ? body.slice(0, PAGE_SNAPSHOT_MAX_LENGTH) + '\n...(truncated)'
+    : body
+
+  return `url: ${url}\ntitle: ${title}\n\n${truncated}`
+}
 
 function getSiteKey(): string {
   return location.hostname
@@ -58,7 +70,8 @@ export default defineContentScript({
         chat.setInputEnabled(false)
         chat.setModelSwitchEnabled(false)
         chat.showTyping()
-        safeSend({ type: 'chat:send', text, settings: chat.settings } as any)
+        const pageContext = capturePageSnapshot()
+        safeSend({ type: 'chat:send', text, settings: chat.settings, pageContext } as any)
       },
       onStop() {
         stopped = true

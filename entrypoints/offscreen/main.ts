@@ -14,22 +14,34 @@ function getCountry(): string {
   return displayNames.of(region) ?? 'unknown'
 }
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(pageContext?: string): string {
   const now = new Date()
   const date = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
   const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   const country = getCountry()
 
-  return [
+  const lines = [
     `date: ${date}`,
     `time: ${time}`,
     `location: ${country}`,
     '',
     'You are Gemma Gem, a browser assistant running inside a Chrome extension.',
-    'Tools available to you: read_page_content, take_screenshot, click_element, type_text, scroll_page, run_javascript',
-    'ALWAYS consider using these tools to answer the user\'s query',
-    'Be concise',
-  ].join('\n')
+    'Your tools are connected to the page the user is chatting from. They require no URL or target — they act on that page directly.',
+    'Be concise.',
+  ]
+
+  if (pageContext) {
+    lines.push(
+      'A snapshot of the current page text is included below. Answer questions from it directly. Only call read_page_content if the snapshot is truncated and you need more, or if you need specific HTML structure.',
+      '',
+      '--- PAGE SNAPSHOT ---',
+      pageContext,
+    )
+  } else {
+    lines.push('When the user asks about page content, use your tools — do not ask for a link or source.')
+  }
+
+  return lines.join('\n')
 }
 
 // ===== WebGPU Diagnostic (run via message: { type: 'webgpu:diagnose' }) =====
@@ -176,7 +188,7 @@ chrome.runtime.onMessage.addListener((message: Message) => {
         return
       }
 
-      const { tabId, userMessage, settings } = message
+      const { tabId, userMessage, settings, pageContext } = message
       log.info('Agent run, tab:', tabId, 'message:', userMessage.slice(0, 80))
 
       const enableThinking = settings?.thinking ?? true
@@ -188,7 +200,7 @@ chrome.runtime.onMessage.addListener((message: Message) => {
           model: modelHost,
           tools: TOOL_DEFINITIONS,
           executor: createToolExecutor(tabId),
-          systemPrompt: buildSystemPrompt(),
+          systemPrompt: buildSystemPrompt(pageContext),
           maxIterations,
           enableThinking,
           onThinkingChunk(text) {

@@ -11,6 +11,7 @@ export type ChatSendMessage = {
   type: 'chat:send'
   text: string
   settings?: ChatSettings
+  pageContext?: string
 }
 
 export type SettingsUpdateMessage = {
@@ -77,6 +78,7 @@ export type AgentRunMessage = {
   tabId: number
   userMessage: string
   settings?: ChatSettings
+  pageContext?: string
 }
 
 export type ModelLoadMessage = {

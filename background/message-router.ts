@@ -26,7 +26,7 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
       log.debug('chat:send from tab', tabId, message.text.slice(0, 50))
 
       await ensureOffscreenDocument()
-      sendToRuntime({ type: 'agent:run', tabId, userMessage: message.text, settings: message.settings })
+      sendToRuntime({ type: 'agent:run', tabId, userMessage: message.text, settings: message.settings, pageContext: message.pageContext })
       return
     }
 
