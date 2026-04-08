@@ -90,3 +90,15 @@ The `agent/` directory has zero dependencies. It defines interfaces (`ModelBacke
 ![Gemma Gem in action](screenshot.png)
 ![Gemma Gem in action](screenshot2.jpg)
 
+
+
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+
+## Contributing
+
+Contributions are welcome! Please open an issue first.
