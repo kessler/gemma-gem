@@ -114,6 +114,11 @@ export type OffscreenModelStatusMessage = {
   error?: string
 }
 
+export type GPUWarningMessage = {
+  type: 'gpu:warning'
+  text: string
+}
+
 export type Message =
   | ChatSendMessage
   | ChatOpenMessage
@@ -133,3 +138,4 @@ export type Message =
   | OffscreenAgentResponseMessage
   | OffscreenAgentChunkMessage
   | OffscreenModelStatusMessage
+  | GPUWarningMessage

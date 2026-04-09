@@ -134,6 +134,17 @@ function createToolExecutor(tabId: number) {
   }
 }
 
+async function checkGPUCompatibility(): Promise<string | null> {
+  try {
+    const adapter = await navigator.gpu?.requestAdapter()
+    if (!adapter) return 'WebGPU is not available on this device. The model requires a GPU with WebGPU support.'
+    if (!adapter.features.has('shader-f16')) return 'Your GPU does not support f16 shaders, which this model requires. It may fail to load.'
+  } catch (e) {
+    log.warn('WebGPU compatibility check failed:', e)
+  }
+  return null
+}
+
 // Agent loop instance per tab
 let currentAgent: AgentLoop | null = null
 let currentTabId: number | null = null
@@ -141,11 +152,19 @@ let currentTabId: number | null = null
 // Model loading is initiated by the background via model:load message
 // (offscreen documents don't have access to chrome.storage)
 
-chrome.runtime.onMessage.addListener((message: Message) => {
+chrome.runtime.onMessage.addListener(async (message: Message) => {
   switch (message.type) {
     case 'model:load': {
       const modelId = message.modelId ?? modelHost.getCurrentModelId() ?? DEFAULT_MODEL_ID
-      modelHost.load(modelId).catch(e => log.error('Model load failed:', e))
+      try {
+        const warning = await checkGPUCompatibility()
+        if (warning) {
+          chrome.runtime.sendMessage({ type: 'gpu:warning', text: warning } satisfies Message)
+        }
+        await modelHost.load(modelId)
+      } catch (e) {
+        log.error('Model load failed:', e)
+      }
       break
     }
 

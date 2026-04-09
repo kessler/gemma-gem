@@ -11,6 +11,11 @@ function sendToTab(tabId: number, message: Message): void {
   chrome.tabs.sendMessage(tabId, message).catch(() => {})
 }
 
+async function sendToActiveTab(message: Message): Promise<void> {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (activeTab?.id) sendToTab(activeTab.id, message)
+}
+
 export function setupMessageRouter(): void {
   chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
     handleMessage(message, sender).then(sendResponse).catch(e => log.error('Message handler error:', e))
@@ -130,11 +135,14 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
       return
     }
 
+    case 'gpu:warning': {
+      await sendToActiveTab(message)
+      return
+    }
+
     case 'model:status': {
       log.info('model:status:', message.status, message.progress ?? '', message.error ?? '')
-
-      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (activeTab?.id) sendToTab(activeTab.id, message)
+      await sendToActiveTab(message)
       return
     }
   }

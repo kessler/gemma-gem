@@ -157,6 +157,10 @@ export default defineContentScript({
           handleToolCall(message.requestId, message.call)
           break
 
+        case 'gpu:warning':
+          chat.addMessage(message.text, 'agent')
+          break
+
         case 'model:status':
           if (message.status === 'loading') {
             const pct = message.progress != null ? Math.round(message.progress) : 0
