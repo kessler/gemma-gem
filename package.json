@@ -2,7 +2,7 @@
   "name": "gemma-gem",
   "description": "Browser AI agent powered by Gemma 4 via WebGPU",
   "license": "Apache-2.0",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "wxt",
