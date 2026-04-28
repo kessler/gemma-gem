@@ -83,10 +83,6 @@ All logs are prefixed with `[Gemma Gem]`. In development builds, info/debug/warn
 
 The offscreen document logs are the most useful — they show model loading, prompt construction, token counts, raw model output, and tool execution.
 
-## Notes
-
-The `agent/` directory has zero dependencies. It defines interfaces (`ModelBackend`, `ToolExecutor`) and can be extracted to a standalone library.
-
 ![Gemma Gem in action](screenshot.png)
 ![Gemma Gem in action](screenshot2.jpg)
 
