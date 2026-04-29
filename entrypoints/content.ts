@@ -130,6 +130,21 @@ export default defineContentScript({
       setGemDisabled(true)
     }
 
+    document.addEventListener('keydown', (e) => {
+      // Alt+G: toggle chat overlay
+      if (e.altKey && !e.ctrlKey && !e.metaKey && e.key === 'g') {
+        if (siteDisabled) return
+        e.preventDefault()
+        chat.toggle()
+        if (chat.isVisible()) safeSend({ type: 'chat:open' })
+        return
+      }
+      // Escape: close chat overlay
+      if (e.key === 'Escape' && !e.altKey && !e.ctrlKey && !e.metaKey && chat.isVisible()) {
+        chat.hide()
+      }
+    })
+
     browser.runtime.onMessage.addListener((message: Message) => {
       switch (message.type) {
         case 'agent:response':
