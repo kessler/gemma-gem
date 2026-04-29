@@ -476,6 +476,10 @@ export class ChatOverlay {
     this.container.style.display = 'none'
   }
 
+  isVisible(): boolean {
+    return this.visible
+  }
+
   appendStream(text: string): void {
     this.hideTyping()
     this.streamText += text
