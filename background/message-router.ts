@@ -101,6 +101,7 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
             func: (code: string) => {
               try {
                 const result = new Function(code)()
+                if (result === undefined || result === null) return { success: true }
                 return { value: String(result) }
               } catch (e) {
                 return { error: String(e) }

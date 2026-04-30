@@ -33,6 +33,19 @@ function stripSpecialTokens(text: string): string {
 // Configure ONNX Runtime to load backend files locally instead of from CDN
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('ort/')
 
+// On Windows, Chrome ignores powerPreference in requestAdapter() and emits a warning.
+// Patch it out before ORT's WebGPU backend calls it.
+if (navigator.gpu && navigator.userAgent.includes('Windows')) {
+  const _requestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu)
+  navigator.gpu.requestAdapter = (options?: GPURequestAdapterOptions) => {
+    if (options) {
+      const { powerPreference: _, ...rest } = options
+      return _requestAdapter(Object.keys(rest).length ? rest : undefined)
+    }
+    return _requestAdapter()
+  }
+}
+
 type StatusCallback = (status: 'loading' | 'ready' | 'error', progress?: number, error?: string) => void
 
 export class GemmaModelHost implements ModelBackend {

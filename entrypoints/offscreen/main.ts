@@ -35,6 +35,12 @@ function buildSystemPrompt(pageContext?: string): string {
     'You are Gemma Gem, a browser assistant running inside a Chrome extension.',
     'Your tools are connected to the page the user is chatting from. They require no URL or target — they act on that page directly.',
     'Be concise.',
+    '',
+    'Tool guidance:',
+    '- click_element: the parameter is named "selector". Use a CSS selector like "a.thumbnail", "#submit", or "button[aria-label=\'Play\']".',
+    '- To navigate to a link: set window.location.href = "url" — this is more reliable than clicking.',
+    '- To find links on the page and pick one: JSON.stringify([...document.querySelectorAll("a[href]")].filter(a=>a.offsetParent&&a.href.startsWith("http")).slice(0,8).map((a,i)=>({i,text:a.textContent.trim().slice(0,60),href:a.href})))',
+    '- After inspecting links, navigate with: window.location.href = "url from results". Do not keep guessing selectors.',
   ]
 
   if (pageContext) {

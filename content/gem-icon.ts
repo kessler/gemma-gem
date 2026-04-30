@@ -116,7 +116,10 @@ export function createGemIcon(onClick: () => void): HTMLElement {
     container.style.boxShadow = '0 2px 12px rgba(139, 92, 246, 0.3)'
   })
 
-  container.addEventListener('click', onClick)
+  container.addEventListener('click', (e) => {
+    e.stopPropagation()
+    onClick()
+  })
 
   return container
 }

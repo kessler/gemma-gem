@@ -286,6 +286,7 @@ export class ChatOverlay {
   constructor(callbacks: ChatOverlayCallbacks) {
     this.host = document.createElement('div')
     this.host.id = 'gemma-gem-chat'
+    this.host.addEventListener('click', (e) => e.stopPropagation())
     this.shadow = this.host.attachShadow({ mode: 'closed' })
 
     const style = document.createElement('style')

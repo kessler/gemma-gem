@@ -25,13 +25,13 @@ export const TOOL_DEFINITIONS: Omit<ToolDefinition, 'execute'>[] = [
   },
   {
     name: 'click_element',
-    description: 'Click on an element identified by a CSS selector',
+    description: 'Click on an element by CSS selector. The "selector" parameter is required and must be a specific CSS selector string (e.g. "a.classname", "#id", "button[aria-label=\'X\']"). If you cannot determine a reliable selector from the page snapshot, use run_javascript instead.',
     parameters: {
       type: 'object',
       properties: {
         selector: {
           type: 'string',
-          description: 'CSS selector for the element to click',
+          description: 'A specific CSS selector string for the element to click',
         },
       },
       required: ['selector'],
@@ -76,7 +76,7 @@ export const TOOL_DEFINITIONS: Omit<ToolDefinition, 'execute'>[] = [
   },
   {
     name: 'run_javascript',
-    description: 'Execute JavaScript in the page context with full DOM access (document, window, etc.). Write code that reads from the DOM directly.',
+    description: 'Execute JavaScript in the page context with full DOM access. Use this to click elements when you cannot determine a reliable CSS selector: e.g. document.querySelectorAll("a")[0].click(). Also use it to inspect elements: JSON.stringify([...document.querySelectorAll("a")].slice(0,5).map(a=>({text:a.textContent.trim(),href:a.href})))',
     parameters: {
       type: 'object',
       properties: {

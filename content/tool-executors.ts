@@ -20,10 +20,13 @@ function readPageContent(args: Record<string, unknown>): ToolResponse {
 }
 
 function clickElement(args: Record<string, unknown>): ToolResponse {
-  const selector = args.selector as string
+  const selector = (args.selector ?? args.body ?? args.element) as string
+  if (!selector) {
+    return { name: 'click_element', result: { error: 'selector parameter is required. If you cannot determine a CSS selector, use run_javascript instead: document.querySelector("a").click()' } }
+  }
   const element = document.querySelector(selector) as HTMLElement | null
   if (!element) {
-    return { name: 'click_element', result: { error: `No element found for selector: ${selector}` } }
+    return { name: 'click_element', result: { error: `No element found for selector: ${selector}. Try run_javascript to inspect available elements: JSON.stringify([...document.querySelectorAll("a")].slice(0,5).map(a=>a.href))` } }
   }
 
   element.click()
