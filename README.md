@@ -55,8 +55,18 @@ Click the gear icon in the chat header:
 - **Model**: Switch between Gemma 4 E2B (~500MB) and E4B (~1.5GB). Selection persists across sessions.
 - **Thinking**: Toggle native Gemma 4 thinking
 - **Max iterations**: Cap on tool call loops per request
+- **Shortcuts**: Rebind the keyboard shortcuts that toggle and close the chat. Click a shortcut field, press the key combination you want, and it's saved. The `↺` button resets a shortcut to its default. Defaults: **Alt+G** toggles the chat, **Escape** closes it. Bindings persist across sessions.
 - **Clear context**: Reset conversation history for the current page
 - **Disable on this site**: Disable the extension per-hostname (persisted)
+
+## Keyboard Shortcuts
+
+| Shortcut | Action | Default |
+|----------|--------|---------|
+| Toggle chat | Open/close the chat overlay from anywhere on the page | `Alt+G` |
+| Close chat | Close the overlay when it's open | `Escape` |
+
+Both are rebindable from the gear-icon settings panel (see **Shortcuts** above).
 
 ## Development
 

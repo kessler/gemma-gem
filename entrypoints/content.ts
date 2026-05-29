@@ -5,6 +5,12 @@ import { executeContentTool } from '@/content/tool-executors'
 import type { Message } from '@/shared/messages'
 import type { ToolCall } from '@kessler/gemma-agent'
 import { MODELS, STORAGE_KEY_MODEL, DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
+import {
+  DEFAULT_SHORTCUTS,
+  STORAGE_KEY_SHORTCUTS,
+  matchesShortcut,
+  type ShortcutsConfig,
+} from '@/shared/shortcuts'
 
 const STORAGE_KEY = 'gemma_disabled_sites'
 const STORAGE_KEY_CHOSEN = 'gemma_model_chosen'
@@ -46,6 +52,16 @@ async function setDisabledForSite(disabled: boolean): Promise<void> {
   await browser.storage.local.set({ [STORAGE_KEY]: sites })
 }
 
+async function loadShortcuts(): Promise<ShortcutsConfig> {
+  const data = await browser.storage.local.get(STORAGE_KEY_SHORTCUTS)
+  // Merge over defaults so a stored partial/legacy value can't drop a binding.
+  return { ...DEFAULT_SHORTCUTS, ...(data[STORAGE_KEY_SHORTCUTS] ?? {}) }
+}
+
+async function saveShortcuts(shortcuts: ShortcutsConfig): Promise<void> {
+  await browser.storage.local.set({ [STORAGE_KEY_SHORTCUTS]: shortcuts })
+}
+
 export default defineContentScript({
   matches: ['<all_urls>'],
   async main() {
@@ -53,6 +69,8 @@ export default defineContentScript({
 
     const modelData = await browser.storage.local.get(STORAGE_KEY_MODEL)
     const initialModelId: ModelId = modelData[STORAGE_KEY_MODEL] ?? DEFAULT_MODEL_ID
+
+    let shortcuts = await loadShortcuts()
 
     function safeSend(message: Message): void {
       try {
@@ -105,9 +123,14 @@ export default defineContentScript({
         browser.storage.local.set({ [STORAGE_KEY_CHOSEN]: true })
         safeSend({ type: 'model:switch', modelId })
       },
+      onShortcutsChange(next: ShortcutsConfig) {
+        shortcuts = next
+        saveShortcuts(next)
+      },
     })
 
     chat.setSelectedModel(initialModelId)
+    chat.setShortcuts(shortcuts)
 
     const modelChosenData = await browser.storage.local.get(STORAGE_KEY_CHOSEN)
     let modelEverChosen = modelChosenData[STORAGE_KEY_CHOSEN] === true
@@ -141,20 +164,29 @@ export default defineContentScript({
       setGemDisabled(true)
     }
 
+    // Capture phase so the shortcut wins even when focus is in the chat input
+    // (the input stops propagation of key events, which would otherwise swallow
+    // the combo in the bubble phase). When recording a rebind, bail out and let
+    // the overlay's own capture listener consume the keystroke.
     document.addEventListener('keydown', (e) => {
-      // Alt+G: toggle chat overlay
-      if (e.altKey && !e.ctrlKey && !e.metaKey && e.key === 'g') {
+      if (chat.isRecording()) return
+
+      // Toggle chat overlay (default Alt+G)
+      if (matchesShortcut(e, shortcuts.toggle)) {
         if (siteDisabled) return
         e.preventDefault()
+        e.stopPropagation()
         chat.toggle()
         if (chat.isVisible()) safeSend({ type: 'chat:open' })
         return
       }
-      // Escape: close chat overlay
-      if (e.key === 'Escape' && !e.altKey && !e.ctrlKey && !e.metaKey && chat.isVisible()) {
+      // Close chat overlay (default Escape)
+      if (matchesShortcut(e, shortcuts.close) && chat.isVisible()) {
+        e.preventDefault()
+        e.stopPropagation()
         chat.hide()
       }
-    })
+    }, true)
 
     browser.runtime.onMessage.addListener((message: Message) => {
       switch (message.type) {

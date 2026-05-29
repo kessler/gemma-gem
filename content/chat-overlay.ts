@@ -1,5 +1,12 @@
 import { marked } from 'marked'
 import { MODELS, DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
+import {
+  DEFAULT_SHORTCUTS,
+  formatShortcut,
+  shortcutFromEvent,
+  type Shortcut,
+  type ShortcutsConfig,
+} from '@/shared/shortcuts'
 
 marked.setOptions({ breaks: true })
 
@@ -123,6 +130,30 @@ const STYLES = `
     font-size: 12px; width: 100%; transition: background 0.2s;
   }
   .setting-disable:hover { background: rgba(239, 68, 68, 0.25); }
+
+  /* Shortcut rebinding */
+  .settings-divider {
+    height: 1px; background: rgba(139, 92, 246, 0.15); margin: 2px 0;
+  }
+  .settings-section-label {
+    font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .shortcut-controls { display: flex; align-items: center; gap: 6px; }
+  .shortcut-key {
+    min-width: 76px; background: rgba(30, 30, 50, 0.6); border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 4px; padding: 3px 8px; color: #e2e8f0; font-size: 12px;
+    font-family: 'SF Mono', Menlo, Consolas, monospace; text-align: center; cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .shortcut-key:hover { border-color: rgba(139, 92, 246, 0.5); }
+  .shortcut-key.recording {
+    border-color: rgba(165, 180, 252, 0.8); color: #a5b4fc;
+  }
+  .shortcut-reset {
+    background: none; border: none; color: #64748b; cursor: pointer;
+    font-size: 13px; padding: 0 2px; line-height: 1; transition: color 0.2s;
+  }
+  .shortcut-reset:hover { color: #e2e8f0; }
 
   /* Messages */
   .chat-messages {
@@ -289,6 +320,7 @@ export interface ChatOverlayCallbacks {
   onClearContext: () => void
   onDisableSite: () => void
   onModelSwitch: (modelId: ModelId) => void
+  onShortcutsChange: (shortcuts: ShortcutsConfig) => void
 }
 
 export class ChatOverlay {
@@ -314,6 +346,12 @@ export class ChatOverlay {
   private thinkingStreamText = ''
   private visible = false
   settings: ChatSettings = { ...DEFAULT_SETTINGS }
+  private shortcuts: ShortcutsConfig = {
+    toggle: { ...DEFAULT_SHORTCUTS.toggle },
+    close: { ...DEFAULT_SHORTCUTS.close },
+  }
+  private shortcutKeyEls: Partial<Record<keyof ShortcutsConfig, HTMLElement>> = {}
+  private stopRecording: (() => void) | null = null
 
   constructor(callbacks: ChatOverlayCallbacks) {
     this.host = document.createElement('div')
@@ -386,6 +424,18 @@ export class ChatOverlay {
       </div>
     `
     this.modelSelect = this.settingsPanel.querySelector('[data-setting="modelId"]') as HTMLSelectElement
+
+    // Shortcuts section
+    const divider = document.createElement('div')
+    divider.className = 'settings-divider'
+    const shortcutsLabel = document.createElement('span')
+    shortcutsLabel.className = 'settings-section-label'
+    shortcutsLabel.textContent = 'Shortcuts'
+    this.settingsPanel.appendChild(divider)
+    this.settingsPanel.appendChild(shortcutsLabel)
+    this.settingsPanel.appendChild(this.createShortcutRow('toggle', 'Toggle chat', callbacks))
+    this.settingsPanel.appendChild(this.createShortcutRow('close', 'Close chat', callbacks))
+
     const disableBtn = document.createElement('button')
     disableBtn.className = 'setting-disable'
     disableBtn.textContent = 'Disable on this site'
@@ -518,6 +568,99 @@ export class ChatOverlay {
     this.thinkingTag.className = `statusbar-tag ${this.settings.thinking ? 'active' : 'inactive'}`
     this.thinkingTag.textContent = `\u{1F9E0} Thinking ${this.settings.thinking ? 'ON' : 'OFF'}`
     this.iterationsTag.textContent = `\u{1F504} ${this.settings.maxIterations} iters`
+  }
+
+  private createShortcutRow(
+    action: keyof ShortcutsConfig,
+    label: string,
+    callbacks: ChatOverlayCallbacks,
+  ): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'setting-row'
+
+    const labelEl = document.createElement('span')
+    labelEl.className = 'setting-label'
+    labelEl.textContent = label
+
+    const controls = document.createElement('div')
+    controls.className = 'shortcut-controls'
+
+    const keyEl = document.createElement('button')
+    keyEl.className = 'shortcut-key'
+    keyEl.title = 'Click, then press the keys to bind'
+    keyEl.addEventListener('click', () => this.beginRecording(action, callbacks))
+
+    const resetEl = document.createElement('button')
+    resetEl.className = 'shortcut-reset'
+    resetEl.textContent = '↺'
+    resetEl.title = 'Reset to default'
+    resetEl.addEventListener('click', () => {
+      this.cancelRecording()
+      this.shortcuts[action] = { ...DEFAULT_SHORTCUTS[action] }
+      this.renderShortcut(action)
+      callbacks.onShortcutsChange(this.cloneShortcuts())
+    })
+
+    controls.appendChild(keyEl)
+    controls.appendChild(resetEl)
+    row.appendChild(labelEl)
+    row.appendChild(controls)
+
+    this.shortcutKeyEls[action] = keyEl
+    this.renderShortcut(action)
+    return row
+  }
+
+  private renderShortcut(action: keyof ShortcutsConfig): void {
+    const keyEl = this.shortcutKeyEls[action]
+    if (!keyEl) return
+    keyEl.classList.remove('recording')
+    keyEl.textContent = formatShortcut(this.shortcuts[action])
+  }
+
+  private cloneShortcuts(): ShortcutsConfig {
+    return { toggle: { ...this.shortcuts.toggle }, close: { ...this.shortcuts.close } }
+  }
+
+  private cancelRecording(): void {
+    if (this.stopRecording) this.stopRecording()
+  }
+
+  isRecording(): boolean {
+    return this.stopRecording !== null
+  }
+
+  private beginRecording(action: keyof ShortcutsConfig, callbacks: ChatOverlayCallbacks): void {
+    // A second click on the same field cancels recording.
+    if (this.stopRecording) {
+      this.stopRecording()
+      return
+    }
+
+    const keyEl = this.shortcutKeyEls[action]
+    if (!keyEl) return
+    keyEl.classList.add('recording')
+    keyEl.textContent = 'Press keys…'
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const shortcut = shortcutFromEvent(e)
+      // Modifier-only press: keep waiting for the real key.
+      if (!shortcut) return
+      // Capture phase + stop both: keeps the bound keys (e.g. Escape) from also
+      // firing the page-level toggle/close handler while we record.
+      e.preventDefault()
+      e.stopPropagation()
+      this.shortcuts[action] = shortcut
+      this.stopRecording?.()
+      callbacks.onShortcutsChange(this.cloneShortcuts())
+    }
+
+    document.addEventListener('keydown', onKeyDown, true)
+    this.stopRecording = () => {
+      document.removeEventListener('keydown', onKeyDown, true)
+      this.stopRecording = null
+      this.renderShortcut(action)
+    }
   }
 
   private handleSend(onSend: (text: string) => void): void {
@@ -702,6 +845,12 @@ export class ChatOverlay {
   setSelectedModel(modelId: ModelId): void {
     this.modelSelect.value = modelId
     this.modelTag.textContent = MODELS[modelId].label
+  }
+
+  setShortcuts(shortcuts: ShortcutsConfig): void {
+    this.shortcuts = { toggle: { ...shortcuts.toggle }, close: { ...shortcuts.close } }
+    this.renderShortcut('toggle')
+    this.renderShortcut('close')
   }
 
   updateStatus(status: string): void {

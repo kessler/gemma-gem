@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (2026-05-30)
+
+### Features
+
+- Keyboard shortcuts to control the chat overlay: **Alt+G** toggles open/closed from anywhere on the page, **Escape** closes it
+- Shortcuts are configurable from the settings panel — click a shortcut field, press the key combination to rebind, or reset to default
+
+### Fixes
+
+- Shortcuts now work while the chat input is focused (the input previously swallowed the key events), so Alt+G and Escape reliably toggle/close the chat from inside the overlay
+
 ## 0.2.0 (2026-04-06)
 
 ### Features
