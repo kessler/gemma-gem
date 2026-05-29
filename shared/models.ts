@@ -13,14 +13,14 @@ export const MODELS: Record<ModelId, ModelConfig> = {
     id: 'gemma-4-e2b',
     hfModelId: 'onnx-community/gemma-4-E2B-it-ONNX',
     label: 'Gemma 4 E2B',
-    downloadSize: '~500MB',
+    downloadSize: '~3.4GB',
     contextLimit: 128_000,
   },
   'gemma-4-e4b': {
     id: 'gemma-4-e4b',
     hfModelId: 'onnx-community/gemma-4-E4B-it-ONNX',
     label: 'Gemma 4 E4B',
-    downloadSize: '~1.5GB',
+    downloadSize: '~5.2GB',
     contextLimit: 128_000,
   },
 }

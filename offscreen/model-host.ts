@@ -41,6 +41,7 @@ export class GemmaModelHost implements ModelBackend {
   private processor: Awaited<ReturnType<typeof AutoProcessor.from_pretrained>> | null = null
   private loading = false
   private currentModelId: ModelId | null = null
+  private lastModelId: ModelId | null = null
   private loadingModelId: ModelId | null = null
   private onStatus: StatusCallback
   private abortController: AbortController | null = null
@@ -102,6 +103,7 @@ export class GemmaModelHost implements ModelBackend {
       this.model = model as InstanceType<typeof Gemma4ForConditionalGeneration>
       this.processor = processor
       this.currentModelId = modelId
+      this.lastModelId = modelId
       this.loadingModelId = null
       this.contextLimit = config.contextLimit
       this.loading = false
@@ -129,6 +131,10 @@ export class GemmaModelHost implements ModelBackend {
 
   getCurrentModelId(): ModelId | null {
     return this.currentModelId ?? this.loadingModelId
+  }
+
+  getLastModelId(): ModelId | null {
+    return this.lastModelId
   }
 
   abort(): void {

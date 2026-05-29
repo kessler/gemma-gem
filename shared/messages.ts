@@ -61,7 +61,7 @@ export type AgentToolCallMessage = {
 
 export type ModelStatusMessage = {
   type: 'model:status'
-  status: 'loading' | 'ready' | 'error'
+  status: 'loading' | 'ready' | 'error' | 'unloaded'
   modelId?: ModelId
   progress?: number
   error?: string
@@ -108,7 +108,7 @@ export type OffscreenAgentChunkMessage = {
 
 export type OffscreenModelStatusMessage = {
   type: 'model:status'
-  status: 'loading' | 'ready' | 'error'
+  status: 'loading' | 'ready' | 'error' | 'unloaded'
   modelId?: ModelId
   progress?: number
   error?: string

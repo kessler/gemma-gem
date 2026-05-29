@@ -7,6 +7,7 @@ import type { ToolCall } from '@kessler/gemma-agent'
 import { MODELS, STORAGE_KEY_MODEL, DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
 
 const STORAGE_KEY = 'gemma_disabled_sites'
+const STORAGE_KEY_CHOSEN = 'gemma_model_chosen'
 const PAGE_SNAPSHOT_MAX_LENGTH = 8000
 
 function capturePageSnapshot(): string {
@@ -100,17 +101,22 @@ export default defineContentScript({
         chat.addMessage(`Switching to ${MODELS[modelId].label}...`, 'agent')
         modelReady = false
         shownLoadingMessage = false
+        modelEverChosen = true
+        browser.storage.local.set({ [STORAGE_KEY_CHOSEN]: true })
         safeSend({ type: 'model:switch', modelId })
       },
     })
 
     chat.setSelectedModel(initialModelId)
 
+    const modelChosenData = await browser.storage.local.get(STORAGE_KEY_CHOSEN)
+    let modelEverChosen = modelChosenData[STORAGE_KEY_CHOSEN] === true
+
     let modelReady = false
     let shownLoadingMessage = false
     let stopped = false
 
-    const icon = createGemIcon(() => {
+    const icon = createGemIcon(async () => {
       if (siteDisabled) {
         if (confirm('Re-enable Gemma Gem on this site?')) {
           siteDisabled = false
@@ -120,7 +126,12 @@ export default defineContentScript({
         return
       }
       chat.toggle()
-      safeSend({ type: 'chat:open' })
+      if (modelEverChosen) {
+        safeSend({ type: 'chat:open' })
+      } else {
+        chat.updateStatus('Select a model')
+        chat.showModelPicker()
+      }
     })
 
     document.body.appendChild(icon)
@@ -204,6 +215,9 @@ export default defineContentScript({
             updateGemProgress(-1)
             chat.updateStatus(`Error: ${message.error}`)
             chat.setModelSwitchEnabled(true)
+          } else if (message.status === 'unloaded') {
+            modelReady = false
+            chat.updateStatus('Unloaded (inactive)')
           }
           break
       }

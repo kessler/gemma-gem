@@ -87,11 +87,35 @@ const modelHost = new GemmaModelHost((status, progress, error) => {
   chrome.runtime.sendMessage({
     type: 'model:status',
     status,
-    modelId: modelHost.getCurrentModelId() ?? undefined,
+    modelId: modelHost.getCurrentModelId() ?? modelHost.getLastModelId() ?? undefined,
     progress,
     error,
   } satisfies Message)
 })
+
+// Inactivity timer — unloads model after 15 minutes of no activity
+const INACTIVITY_TIMEOUT = 30 * 60 * 1000
+let inactivityTimer: ReturnType<typeof setTimeout> | null = null
+
+function resetInactivityTimer(): void {
+  if (inactivityTimer) clearTimeout(inactivityTimer)
+  inactivityTimer = setTimeout(() => {
+    log.info('Inactivity timeout reached — unloading model')
+    modelHost.unload()
+    chrome.runtime.sendMessage({
+      type: 'model:status',
+      status: 'unloaded',
+      modelId: modelHost.getLastModelId() ?? undefined,
+    } satisfies Message)
+  }, INACTIVITY_TIMEOUT)
+}
+
+function clearInactivityTimer(): void {
+  if (inactivityTimer) {
+    clearTimeout(inactivityTimer)
+    inactivityTimer = null
+  }
+}
 
 // Pending tool results keyed by requestId
 const pendingToolResults = new Map<string, { resolve: (result: unknown) => void, timeoutId: number }>()
@@ -178,6 +202,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
           chrome.runtime.sendMessage({ type: 'gpu:warning', text: warning } satisfies Message)
         }
         await modelHost.load(modelId)
+        resetInactivityTimer()
       } catch (e) {
         log.error('Model load failed:', e)
       }
@@ -187,6 +212,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
     case 'model:switch': {
       const { modelId } = message
       log.info('Switching model to:', modelId)
+      resetInactivityTimer()
       if (currentAgent) {
         currentAgent.clearHistory()
       }
@@ -207,6 +233,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
     case 'settings:update': {
       const { settings } = message
       log.info('Settings updated:', settings)
+      resetInactivityTimer()
       if (currentAgent) {
         currentAgent.updateOptions({
           thinking: settings.thinking,
@@ -218,6 +245,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
 
     case 'chat:stop': {
       log.info('Generation stopped by user')
+      resetInactivityTimer()
       modelHost.abort()
       if (currentAgent) {
         currentAgent.abort()
@@ -227,6 +255,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
 
     case 'context:clear': {
       log.info('Context cleared')
+      resetInactivityTimer()
       if (currentAgent) {
         currentAgent.clearHistory()
       }
@@ -235,13 +264,26 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
 
     case 'agent:run': {
       if (!modelHost.isLoaded()) {
+        const modelId = modelHost.getLastModelId() ?? DEFAULT_MODEL_ID
+        log.info('Model not loaded — auto-loading before agent run')
         chrome.runtime.sendMessage({
-          type: 'agent:response',
-          tabId: message.tabId,
-          text: 'Model is still loading. Please wait...',
+          type: 'model:status',
+          status: 'loading',
+          modelId,
         } satisfies Message)
-        return
+        try {
+          await modelHost.load(modelId)
+        } catch (e) {
+          log.error('Auto-load failed:', e)
+          chrome.runtime.sendMessage({
+            type: 'agent:response',
+            tabId: message.tabId,
+            text: 'Failed to reload model. Please open the chat again.',
+          } satisfies Message)
+          return
+        }
       }
+      resetInactivityTimer()
 
       const { tabId, userMessage, settings, pageContext } = message
       log.info('Agent run, tab:', tabId, 'message:', userMessage.slice(0, 80))
@@ -308,6 +350,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
 
     case 'tool:result': {
       log.debug('Tool result received:', message.requestId)
+      resetInactivityTimer()
       const entry = pendingToolResults.get(message.requestId)
       if (entry) {
         clearTimeout(entry.timeoutId)

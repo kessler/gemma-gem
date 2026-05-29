@@ -250,6 +250,36 @@ const STYLES = `
   .chat-stop { background: rgba(239, 68, 68, 0.5); }
   .chat-stop:hover { background: rgba(239, 68, 68, 0.7); }
   .chat-send svg, .chat-stop svg { width: 18px; height: 18px; }
+
+  /* Model picker */
+  .model-picker {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 24px;
+    gap: 14px;
+  }
+  .model-picker.visible { display: flex; }
+  .model-picker-title { font-size: 15px; font-weight: 600; color: #c4b5fd; text-align: center; }
+  .model-picker-subtitle { font-size: 11px; color: #64748b; text-align: center; line-height: 1.4; }
+  .model-options { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+  .model-option {
+    background: rgba(30, 30, 50, 0.8);
+    border: 1px solid rgba(139, 92, 246, 0.25);
+    border-radius: 10px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+    text-align: center;
+    user-select: none;
+  }
+  .model-option:hover { background: rgba(139, 92, 246, 0.15); border-color: rgba(139, 92, 246, 0.5); }
+  .model-option:active { background: rgba(139, 92, 246, 0.2); }
+  .model-option-name { font-size: 14px; font-weight: 600; color: #e2e8f0; }
+  .model-option-size { font-size: 11px; color: #a5b4fc; margin-top: 3px; }
+  .model-option-desc { font-size: 11px; color: #64748b; margin-top: 2px; }
 `
 
 export interface ChatOverlayCallbacks {
@@ -275,6 +305,8 @@ export class ChatOverlay {
   private iterationsTag: HTMLElement
   private modelTag: HTMLElement
   private modelSelect: HTMLSelectElement
+  private modelPickerEl: HTMLElement
+  private inputAreaEl: HTMLElement
   private typingEl: HTMLElement | null = null
   private streamEl: HTMLElement | null = null
   private streamText = ''
@@ -405,13 +437,30 @@ export class ChatOverlay {
     statusBar.appendChild(tags)
     statusBar.appendChild(clearBtn)
 
+    // Model picker
+    this.modelPickerEl = document.createElement('div')
+    this.modelPickerEl.className = 'model-picker'
+    this.modelPickerEl.innerHTML = `
+      <div class="model-picker-title">Choose a model</div>
+      <div class="model-picker-subtitle">Select which Gemma 4 model to download and run locally via WebGPU.</div>
+      <div class="model-options">
+        ${Object.values(MODELS).map(m => `
+          <div class="model-option" data-model="${m.id}">
+            <div class="model-option-name">${m.label}</div>
+            <div class="model-option-size">${m.downloadSize}</div>
+            <div class="model-option-desc">${m.id === 'gemma-4-e2b' ? 'Faster, less RAM' : 'Smarter, more RAM'}</div>
+          </div>
+        `).join('')}
+      </div>
+    `
+
     // Messages
     this.messagesEl = document.createElement('div')
     this.messagesEl.className = 'chat-messages'
 
     // Input area
-    const inputArea = document.createElement('div')
-    inputArea.className = 'chat-input-area'
+    this.inputAreaEl = document.createElement('div')
+    this.inputAreaEl.className = 'chat-input-area'
     this.inputEl = document.createElement('textarea')
     this.inputEl.className = 'chat-input'
     this.inputEl.placeholder = 'Ask about this page...'
@@ -425,16 +474,30 @@ export class ChatOverlay {
     this.stopBtn.style.display = 'none'
     this.stopBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
 
-    inputArea.appendChild(this.inputEl)
-    inputArea.appendChild(this.sendBtn)
-    inputArea.appendChild(this.stopBtn)
+    this.inputAreaEl.appendChild(this.inputEl)
+    this.inputAreaEl.appendChild(this.sendBtn)
+    this.inputAreaEl.appendChild(this.stopBtn)
 
     this.container.appendChild(header)
     this.container.appendChild(this.settingsPanel)
     this.container.appendChild(statusBar)
+    this.container.appendChild(this.modelPickerEl)
     this.container.appendChild(this.messagesEl)
-    this.container.appendChild(inputArea)
+    this.container.appendChild(this.inputAreaEl)
+
     this.shadow.appendChild(this.container)
+
+    // Model picker click handlers
+    const pickerOptions = this.modelPickerEl.querySelectorAll('.model-option')
+    for (const opt of pickerOptions) {
+      opt.addEventListener('click', () => {
+        const modelId = (opt as HTMLElement).dataset.model as ModelId
+        if (modelId) {
+          this.hideModelPicker()
+          callbacks.onModelSwitch(modelId)
+        }
+      })
+    }
 
     this.sendBtn.addEventListener('click', () => this.handleSend(callbacks.onSend))
     this.stopBtn.addEventListener('click', () => callbacks.onStop())
@@ -666,6 +729,18 @@ export class ChatOverlay {
       this.sendBtn.style.display = 'none'
       this.stopBtn.style.display = 'flex'
     }
+  }
+
+  showModelPicker(): void {
+    this.modelPickerEl.classList.add('visible')
+    this.messagesEl.style.display = 'none'
+    this.inputAreaEl.style.display = 'none'
+  }
+
+  hideModelPicker(): void {
+    this.modelPickerEl.classList.remove('visible')
+    this.messagesEl.style.display = 'flex'
+    this.inputAreaEl.style.display = 'flex'
   }
 
   getElement(): HTMLElement {
