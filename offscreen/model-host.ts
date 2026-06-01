@@ -31,7 +31,7 @@ function stripSpecialTokens(text: string): string {
 }
 
 // Configure ONNX Runtime to load backend files locally instead of from CDN
-env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('ort/')
+env.backends.onnx.wasm!.wasmPaths = chrome.runtime.getURL('ort/')
 
 // On Windows, Chrome ignores powerPreference in requestAdapter() and emits a warning.
 // Patch it out before ORT's WebGPU backend calls it.
@@ -159,12 +159,17 @@ export class GemmaModelHost implements ModelBackend {
 
     log.debug('Step 1: tokenizing')
     let inputs: any
+    const processor = this.processor as any
+    const tokenizer = processor.tokenizer
+    if (!tokenizer) {
+      throw new Error('Tokenizer not loaded')
+    }
     try {
       if (options?.imageDataUrl) {
         const image = await load_image(options.imageDataUrl)
-        inputs = await this.processor(prompt, image, null, { add_special_tokens: false })
+        inputs = await processor(prompt, image, null, { add_special_tokens: false })
       } else {
-        inputs = this.processor.tokenizer(prompt, {
+        inputs = tokenizer(prompt, {
           add_special_tokens: false,
           return_tensor: 'pt',
         })
@@ -180,7 +185,7 @@ export class GemmaModelHost implements ModelBackend {
     let insideToolCall = false
     let streamer: InstanceType<typeof TextStreamer>
     try {
-      streamer = new TextStreamer(this.processor.tokenizer, {
+      streamer = new TextStreamer(tokenizer, {
         skip_prompt: true,
         skip_special_tokens: false,
         callback_function: (text: string) => {
@@ -249,7 +254,11 @@ export class GemmaModelHost implements ModelBackend {
     if (!this.processor) {
       throw new Error('Cannot count tokens: model not loaded')
     }
-    const { input_ids } = this.processor.tokenizer(text, { add_special_tokens: false })
+    const tokenizer = (this.processor as any).tokenizer
+    if (!tokenizer) {
+      throw new Error('Cannot count tokens: tokenizer not loaded')
+    }
+    const { input_ids } = tokenizer(text, { add_special_tokens: false })
     return input_ids.size
   }
 

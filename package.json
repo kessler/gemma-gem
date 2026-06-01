@@ -4,6 +4,22 @@
   "license": "Apache-2.0",
   "version": "0.3.0",
   "type": "module",
+  "bin": {
+    "gemma-gem-bridge": "host/bin/gemma-gem-bridge.cjs"
+  },
+  "files": [
+    "host/bin",
+    "host/scripts/stop-bridge.cjs",
+    "docs/*.md",
+    "host/src",
+    "scripts/postinstall.cjs",
+    "shared/bridge-messages.ts",
+    "shared/bridge-settings.ts",
+    "shared/messages.ts",
+    "shared/models.ts",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "wxt",
     "dev:firefox": "wxt -b firefox",
@@ -12,16 +28,32 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
+    "bridge": "node --import tsx host/src/index.ts",
+    "bridge:http": "node --import tsx host/src/index.ts --http",
+    "bridge:stop": "node host/scripts/stop-bridge.cjs",
+    "browser:install": "tsx scripts/install-chrome-for-testing.ts",
+    "browser:debug": "tsx scripts/launch-extension-debug.ts",
+    "benchmark:web": "tsx benchmarks/web-control-plane/run.ts",
     "compile": "tsc --noEmit",
-    "postinstall": "wxt prepare"
+    "test:e2e": "tsx --test host/test/*.test.ts",
+    "test": "pnpm compile && pnpm test:e2e",
+    "postinstall": "node scripts/postinstall.cjs"
   },
   "devDependencies": {
+    "@types/chrome": "^0.1.40",
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "@webgpu/types": "^0.1.69",
     "typescript": "^5.9.3",
     "wxt": "^0.20.20"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.1.0",
     "@kessler/gemma-agent": "^1.0.0",
-    "marked": "^17.0.5"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "marked": "^17.0.5",
+    "tsx": "^4.21.0",
+    "ws": "^8.20.0",
+    "zod": "^4.4.1"
   }
 }

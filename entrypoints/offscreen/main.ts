@@ -99,6 +99,40 @@ const modelHost = new GemmaModelHost((status, progress, error) => {
   } satisfies Message)
 })
 
+let modelLoadPromise: Promise<void> | null = null
+let modelLoadModelId: ModelId | null = null
+
+async function ensureModelLoaded(modelId: ModelId = modelHost.getCurrentModelId() ?? DEFAULT_MODEL_ID): Promise<void> {
+  if (modelHost.isLoaded() && modelHost.getCurrentModelId() === modelId) {
+    return
+  }
+
+  if (modelLoadPromise) {
+    if (modelLoadModelId === modelId) {
+      await modelLoadPromise
+      return
+    }
+    await modelLoadPromise
+    if (modelHost.isLoaded() && modelHost.getCurrentModelId() === modelId) {
+      return
+    }
+  }
+
+  modelLoadModelId = modelId
+  modelLoadPromise = (async () => {
+    const warning = await checkGPUCompatibility()
+    if (warning) {
+      chrome.runtime.sendMessage({ type: 'gpu:warning', text: warning } satisfies Message)
+    }
+    await modelHost.load(modelId)
+  })().finally(() => {
+    modelLoadPromise = null
+    modelLoadModelId = null
+  })
+
+  await modelLoadPromise
+}
+
 // Pending tool results keyed by requestId
 const pendingToolResults = new Map<string, { resolve: (result: unknown) => void, timeoutId: number }>()
 let requestIdCounter = 0
@@ -163,11 +197,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
     case 'model:load': {
       const modelId = message.modelId ?? modelHost.getCurrentModelId() ?? DEFAULT_MODEL_ID
       try {
-        const warning = await checkGPUCompatibility()
-        if (warning) {
-          chrome.runtime.sendMessage({ type: 'gpu:warning', text: warning } satisfies Message)
-        }
-        await modelHost.load(modelId)
+        await ensureModelLoaded(modelId)
       } catch (e) {
         log.error('Model load failed:', e)
       }
@@ -183,7 +213,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
       currentAgent = null
       currentTabId = null
       // Storage persistence is handled by the background service worker
-      modelHost.load(modelId).catch(e => log.error('Model switch failed:', e))
+      ensureModelLoaded(modelId).catch(e => log.error('Model switch failed:', e))
       break
     }
 
@@ -225,12 +255,17 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
 
     case 'agent:run': {
       if (!modelHost.isLoaded()) {
-        chrome.runtime.sendMessage({
-          type: 'agent:response',
-          tabId: message.tabId,
-          text: 'Model is still loading. Please wait...',
-        } satisfies Message)
-        return
+        try {
+          await ensureModelLoaded(message.modelId ?? modelHost.getCurrentModelId() ?? DEFAULT_MODEL_ID)
+        } catch (e) {
+          const error = e instanceof Error ? e.message : String(e)
+          chrome.runtime.sendMessage({
+            type: 'agent:response',
+            tabId: message.tabId,
+            text: `Model failed to load: ${error}`,
+          } satisfies Message)
+          return
+        }
       }
 
       const { tabId, userMessage, settings, pageContext } = message

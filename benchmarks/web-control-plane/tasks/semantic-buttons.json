@@ -1,0 +1,49 @@
+[
+  {
+    "id": "semantic-receipt-agent",
+    "suite": "semantic-buttons",
+    "title": "Choose the receipt proof button",
+    "tool": "gemma_agent",
+    "arguments": {
+      "tabId": 101,
+      "task": "get proof of last payment",
+      "thinking": false,
+      "maxIterations": 3
+    },
+    "expect": {
+      "contains": ["#download-receipt", "INV-2026-041"],
+      "bridgeRunAgent": true
+    }
+  },
+  {
+    "id": "semantic-observe-json",
+    "suite": "semantic-buttons",
+    "title": "Observe the receipt action as valid JSON",
+    "tool": "gemma_observe",
+    "arguments": {
+      "tabId": 101,
+      "instruction": "find the control that downloads proof of the last payment"
+    },
+    "expect": {
+      "json": "array",
+      "selector": "#download-receipt",
+      "method": "click"
+    }
+  },
+  {
+    "id": "semantic-page-brief",
+    "suite": "semantic-buttons",
+    "title": "Brief exposes meaningful billing controls",
+    "tool": "gemma_page_brief",
+    "arguments": {
+      "tabId": 101,
+      "selector": "body",
+      "format": "text",
+      "maxChars": 4000
+    },
+    "expect": {
+      "contains": ["Receipt PDF", "Payment settings", "INV-2026-041"],
+      "bridgeExecuteTool": "read_page_content"
+    }
+  }
+]

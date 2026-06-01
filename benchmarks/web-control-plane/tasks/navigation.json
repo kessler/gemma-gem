@@ -1,0 +1,25 @@
+[
+  {
+    "id": "active-tab-contract",
+    "suite": "navigation",
+    "title": "Active tab metadata is available to caller agents",
+    "tool": "gemma_active_tab",
+    "arguments": {},
+    "expect": {
+      "contains": ["Billing sandbox", "semantic-buttons.html"],
+      "activeTabId": 101
+    }
+  },
+  {
+    "id": "screenshot-contract",
+    "suite": "navigation",
+    "title": "Screenshot returns MCP image content",
+    "tool": "gemma_screenshot",
+    "arguments": {
+      "tabId": 101
+    },
+    "expect": {
+      "image": "image/png"
+    }
+  }
+]

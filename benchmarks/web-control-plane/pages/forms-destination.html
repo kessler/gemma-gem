@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Profile destination</title>
+  </head>
+  <body>
+    <main>
+      <label>
+        Name
+        <input id="dest-name" name="name">
+      </label>
+      <label>
+        Email
+        <input id="dest-email" name="email">
+      </label>
+      <button id="save-profile">Save profile</button>
+      <p id="save-result"></p>
+    </main>
+    <script>
+      document.querySelector('#save-profile').addEventListener('click', () => {
+        const name = document.querySelector('#dest-name').value
+        const email = document.querySelector('#dest-email').value
+        document.querySelector('#save-result').textContent = `Saved ${name} <${email}>`
+      })
+    </script>
+  </body>
+</html>

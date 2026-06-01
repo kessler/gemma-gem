@@ -1,10 +1,11 @@
-import { createGemIcon, updateGemProgress, setGemDisabled } from '@/content/gem-icon'
+import { createGemIcon, updateGemProgress, setGemDisabled, setGemRelayActivity, type GemRelayActivityState } from '@/content/gem-icon'
 import { ChatOverlay } from '@/content/chat-overlay'
 import type { ChatSettings } from '@/content/chat-overlay'
 import { executeContentTool } from '@/content/tool-executors'
 import type { Message } from '@/shared/messages'
 import type { ToolCall } from '@kessler/gemma-agent'
 import { MODELS, STORAGE_KEY_MODEL, DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
+import { BRIDGE_STORAGE_KEY, DEFAULT_BRIDGE_SETTINGS, type BridgeConnectionStatus, type BridgeSettings } from '@/shared/bridge-settings'
 
 const STORAGE_KEY = 'gemma_disabled_sites'
 const PAGE_SNAPSHOT_MAX_LENGTH = 8000
@@ -25,14 +26,16 @@ function getSiteKey(): string {
 }
 
 async function isDisabledForSite(): Promise<boolean> {
-  const data = await browser.storage.local.get(STORAGE_KEY)
-  const sites: string[] = data[STORAGE_KEY] ?? []
+  const data = await browser.storage.local.get(STORAGE_KEY) as Record<string, unknown>
+  const storedSites = data[STORAGE_KEY]
+  const sites: string[] = Array.isArray(storedSites) ? storedSites as string[] : []
   return sites.includes(getSiteKey())
 }
 
 async function setDisabledForSite(disabled: boolean): Promise<void> {
-  const data = await browser.storage.local.get(STORAGE_KEY)
-  const sites: string[] = data[STORAGE_KEY] ?? []
+  const data = await browser.storage.local.get(STORAGE_KEY) as Record<string, unknown>
+  const storedSites = data[STORAGE_KEY]
+  const sites: string[] = Array.isArray(storedSites) ? [...storedSites as string[]] : []
   const site = getSiteKey()
 
   if (disabled && !sites.includes(site)) {
@@ -45,13 +48,36 @@ async function setDisabledForSite(disabled: boolean): Promise<void> {
   await browser.storage.local.set({ [STORAGE_KEY]: sites })
 }
 
+function generateToken(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function readBridgeSettingsFallback(): Promise<BridgeSettings> {
+  const data = await browser.storage.local.get(BRIDGE_STORAGE_KEY) as Record<string, unknown>
+  const stored = data[BRIDGE_STORAGE_KEY] as Partial<BridgeSettings> | undefined
+  const settings: BridgeSettings = {
+    ...DEFAULT_BRIDGE_SETTINGS,
+    ...stored,
+  }
+
+  if (!settings.token) {
+    settings.token = generateToken()
+    await browser.storage.local.set({ [BRIDGE_STORAGE_KEY]: settings })
+  }
+
+  return settings
+}
+
 export default defineContentScript({
   matches: ['<all_urls>'],
   async main() {
     let siteDisabled = await isDisabledForSite()
 
-    const modelData = await browser.storage.local.get(STORAGE_KEY_MODEL)
-    const initialModelId: ModelId = modelData[STORAGE_KEY_MODEL] ?? DEFAULT_MODEL_ID
+    const modelData = await browser.storage.local.get(STORAGE_KEY_MODEL) as Record<string, unknown>
+    const storedModelId = modelData[STORAGE_KEY_MODEL]
+    const initialModelId: ModelId = typeof storedModelId === 'string' ? storedModelId as ModelId : DEFAULT_MODEL_ID
 
     function safeSend(message: Message): void {
       try {
@@ -102,13 +128,38 @@ export default defineContentScript({
         shownLoadingMessage = false
         safeSend({ type: 'model:switch', modelId })
       },
+      onBridgeSettingsChange(settings) {
+        browser.runtime.sendMessage({ type: 'bridge:settings:update', settings } as any).then((response: {
+          settings: BridgeSettings
+          status: BridgeConnectionStatus
+          error?: string
+        }) => {
+          chat.setBridgeSettings(response.settings)
+          chat.setBridgeStatus(response.status, response.error)
+        }).catch(() => {
+          chat.setBridgeStatus('error', 'Extension reloaded — refresh the page')
+        })
+      },
     })
 
     chat.setSelectedModel(initialModelId)
+    browser.runtime.sendMessage({ type: 'bridge:settings:get' } as any).then((response: {
+      settings: BridgeSettings
+      status: BridgeConnectionStatus
+      error?: string
+    }) => {
+      chat.setBridgeSettings(response.settings)
+      chat.setBridgeStatus(response.status, response.error)
+    }).catch(async () => {
+      const settings = await readBridgeSettingsFallback()
+      chat.setBridgeSettings(settings)
+      chat.setBridgeStatus('error', 'Extension reloaded — refresh the page')
+    })
 
     let modelReady = false
     let shownLoadingMessage = false
     let stopped = false
+    let relayIconState: GemRelayActivityState = 'idle'
 
     const icon = createGemIcon(() => {
       if (siteDisabled) {
@@ -116,6 +167,15 @@ export default defineContentScript({
           siteDisabled = false
           setDisabledForSite(false)
           setGemDisabled(false)
+        }
+        return
+      }
+      if (relayIconState !== 'idle') {
+        chat.showRelay()
+        safeSend({ type: 'chat:open' })
+        if (relayIconState !== 'running') {
+          relayIconState = 'idle'
+          setGemRelayActivity('idle')
         }
         return
       }
@@ -191,6 +251,21 @@ export default defineContentScript({
             chat.setModelSwitchEnabled(true)
           }
           break
+
+        case 'bridge:status':
+          chat.setBridgeStatus(message.status, message.error)
+          break
+
+        case 'bridge:activity': {
+          chat.handleBridgeActivity(message)
+          relayIconState = message.status === 'error'
+            ? 'error'
+            : message.status === 'completed'
+              ? 'attention'
+              : 'running'
+          setGemRelayActivity(relayIconState, message.title ?? message.toolName ?? message.text)
+          break
+        }
       }
     })
 

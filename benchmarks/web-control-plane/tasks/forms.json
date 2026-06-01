@@ -1,0 +1,34 @@
+[
+  {
+    "id": "transfer-profile-fields",
+    "suite": "forms",
+    "title": "Transfer account fields between tabs",
+    "tool": "gemma_transfer_fields",
+    "arguments": {
+      "sourceTabId": 103,
+      "destinationTabId": 104,
+      "mappings": [
+        {
+          "label": "Full name",
+          "fromSelector": "#source-name",
+          "toSelector": "#dest-name"
+        },
+        {
+          "label": "Email",
+          "fromSelector": "#source-email",
+          "toSelector": "#dest-email"
+        }
+      ],
+      "submitSelector": "#save-profile",
+      "resultSelector": "#save-result"
+    },
+    "expect": {
+      "contains": ["Ada Lovelace", "ada@example.test"],
+      "destinationValues": {
+        "#dest-name": "Ada Lovelace",
+        "#dest-email": "ada@example.test"
+      },
+      "clicked": "#save-profile"
+    }
+  }
+]

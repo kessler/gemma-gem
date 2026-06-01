@@ -1,0 +1,34 @@
+[
+  {
+    "id": "extract-pricing-json",
+    "suite": "extraction",
+    "title": "Extract pricing cards as strict JSON",
+    "tool": "gemma_extract",
+    "arguments": {
+      "tabId": 102,
+      "instruction": "extract the pricing plans and monthly prices",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "price": { "type": "string" }
+              },
+              "required": ["name", "price"]
+            }
+          }
+        },
+        "required": ["plans"]
+      }
+    },
+    "expect": {
+      "json": "object",
+      "contains": ["Starter", "$19", "Team", "$49"],
+      "minPlans": 2
+    }
+  }
+]

@@ -56,6 +56,28 @@ export const TOOL_DEFINITIONS: Omit<ToolDefinition, 'execute'>[] = [
     },
   },
   {
+    name: 'select_option',
+    description: 'Select an option in a select dropdown by exact option value or visible label',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: {
+          type: 'string',
+          description: 'CSS selector for the select element',
+        },
+        value: {
+          type: 'string',
+          description: 'Exact option value to select',
+        },
+        label: {
+          type: 'string',
+          description: 'Exact visible option label to select',
+        },
+      },
+      required: ['selector'],
+    },
+  },
+  {
     name: 'scroll_page',
     description: 'Scroll the page up or down',
     parameters: {

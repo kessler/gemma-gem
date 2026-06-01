@@ -1,7 +1,8 @@
 import type { Message } from '@/shared/messages'
-import { ensureOffscreenDocument } from './offscreen-manager'
+import { ensureOffscreenDocument, ensureOffscreenModel } from './offscreen-manager'
+import { getBridgeSettings, getBridgeStatus, handleBridgeRuntimeMessage, updateBridgeSettings } from './bridge-client'
 import { log } from '@/shared/logger'
-import { STORAGE_KEY_MODEL, DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
+import { STORAGE_KEY_MODEL } from '@/shared/models'
 
 function sendToRuntime(message: Message): void {
   chrome.runtime.sendMessage(message).catch(() => {})
@@ -30,17 +31,14 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
       if (!tabId) return
       log.debug('chat:send from tab', tabId, message.text.slice(0, 50))
 
-      await ensureOffscreenDocument()
-      sendToRuntime({ type: 'agent:run', tabId, userMessage: message.text, settings: message.settings, pageContext: message.pageContext })
+      const modelId = await ensureOffscreenModel()
+      sendToRuntime({ type: 'agent:run', tabId, userMessage: message.text, modelId, settings: message.settings, pageContext: message.pageContext })
       return
     }
 
     case 'chat:open': {
       log.debug('chat:open — ensuring offscreen document')
-      await ensureOffscreenDocument()
-      const data = await chrome.storage.local.get(STORAGE_KEY_MODEL)
-      const modelId: ModelId = data[STORAGE_KEY_MODEL] ?? DEFAULT_MODEL_ID
-      sendToRuntime({ type: 'model:load', modelId })
+      await ensureOffscreenModel()
       return
     }
 
@@ -54,6 +52,16 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
       log.debug('chat:stop')
       sendToRuntime(message)
       return
+    }
+
+    case 'bridge:settings:get': {
+      const settings = await getBridgeSettings()
+      return { settings, ...getBridgeStatus() }
+    }
+
+    case 'bridge:settings:update': {
+      const settings = await updateBridgeSettings(message.settings)
+      return { settings, ...getBridgeStatus() }
     }
 
     case 'context:clear': {
@@ -71,6 +79,7 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
     }
 
     case 'tool:result': {
+      if (handleBridgeRuntimeMessage(message)) return
       log.debug('tool:result', message.requestId)
       sendToRuntime(message)
       return
@@ -122,6 +131,7 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
     }
 
     case 'agent:response': {
+      if (handleBridgeRuntimeMessage(message)) return
       if ('tabId' in message) {
         log.info('agent:response →', message.text.slice(0, 80))
         sendToTab(message.tabId, { type: 'agent:response', text: message.text })
@@ -130,6 +140,7 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
     }
 
     case 'agent:chunk': {
+      if (handleBridgeRuntimeMessage(message)) return
       if ('tabId' in message) {
         sendToTab(message.tabId, { type: 'agent:chunk', text: message.text })
       }

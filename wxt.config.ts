@@ -34,10 +34,15 @@ export default defineConfig({
   manifest: {
     name: mode === 'development' ? 'Gemma Gem [dev]' : 'Gemma Gem',
     description: 'Browser AI agent powered by Gemma 4 via WebGPU',
-    permissions: ['activeTab', 'scripting', 'offscreen', 'storage'],
+    minimum_chrome_version: '116',
+    permissions: ['activeTab', 'scripting', 'offscreen', 'storage', 'tabs'],
     host_permissions: ['<all_urls>'],
     content_security_policy: {
-      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* https://huggingface.co https://*.huggingface.co https://*.hf.co",
+    },
+    options_ui: {
+      page: 'options.html',
+      open_in_tab: true,
     },
   },
   vite: () => ({

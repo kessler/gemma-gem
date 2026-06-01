@@ -8,6 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.browsers/chrome-for-testing
+.browsers/gemma-gem-debug-profile
 .output
 stats.html
 stats-*.json

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web Control Autoresearch"
+  short_description: "Run Gemma Gem web-control benchmark loops"
+  default_prompt: "Use web-control-autoresearch to run a measured Gemma Gem browser-control experiment loop."
