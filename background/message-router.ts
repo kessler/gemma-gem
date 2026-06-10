@@ -1,7 +1,20 @@
 import type { Message } from '@/shared/messages'
 import { ensureOffscreenDocument } from './offscreen-manager'
 import { log } from '@/shared/logger'
-import { STORAGE_KEY_MODEL, DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
+import {
+  STORAGE_KEY_MODEL,
+  STORAGE_KEY_REMOTE,
+  DEFAULT_MODEL_ID,
+  DEFAULT_REMOTE_CONFIG,
+  isRemoteModel,
+  type ModelId,
+  type RemoteEndpointConfig,
+} from '@/shared/models'
+
+async function getRemoteConfig(): Promise<RemoteEndpointConfig> {
+  const data = await chrome.storage.local.get(STORAGE_KEY_REMOTE)
+  return { ...DEFAULT_REMOTE_CONFIG, ...(data[STORAGE_KEY_REMOTE] ?? {}) }
+}
 
 function sendToRuntime(message: Message): void {
   chrome.runtime.sendMessage(message).catch(() => {})
@@ -40,13 +53,20 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
       await ensureOffscreenDocument()
       const data = await chrome.storage.local.get(STORAGE_KEY_MODEL)
       const modelId: ModelId = data[STORAGE_KEY_MODEL] ?? DEFAULT_MODEL_ID
-      sendToRuntime({ type: 'model:load', modelId })
+      const remoteConfig = isRemoteModel(modelId) ? await getRemoteConfig() : undefined
+      sendToRuntime({ type: 'model:load', modelId, remoteConfig })
       return
     }
 
     case 'settings:update': {
       log.debug('settings:update', message.settings)
       sendToRuntime(message)
+      return
+    }
+
+    case 'remote:config': {
+      log.debug('remote:config', message.config.baseUrl)
+      await chrome.storage.local.set({ [STORAGE_KEY_REMOTE]: message.config })
       return
     }
 
@@ -66,7 +86,39 @@ async function handleMessage(message: Message, sender: chrome.runtime.MessageSen
       log.debug('model:switch', message.modelId)
       await chrome.storage.local.set({ [STORAGE_KEY_MODEL]: message.modelId })
       await ensureOffscreenDocument()
-      sendToRuntime(message)
+      let remoteConfig = message.remoteConfig
+      if (isRemoteModel(message.modelId)) {
+        if (remoteConfig) {
+          // Persist the config the user just entered before forwarding it.
+          await chrome.storage.local.set({ [STORAGE_KEY_REMOTE]: remoteConfig })
+        } else {
+          remoteConfig = await getRemoteConfig()
+        }
+      } else {
+        remoteConfig = undefined
+      }
+      sendToRuntime({ ...message, remoteConfig })
+      return
+    }
+
+    case 'remote:fetch_models': {
+      const tabId = sender.tab?.id
+      if (!tabId) return
+      const base = message.baseUrl.replace(/\/+$/, '')
+      const headers: Record<string, string> = {
+        'ngrok-skip-browser-warning': '1',
+      }
+      if (message.apiKey) headers['Authorization'] = `Bearer ${message.apiKey}`
+      try {
+        const res = await fetch(`${base}/models`, { headers })
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+        const data = await res.json()
+        const models: string[] = data?.data?.map((m: { id: string }) => m.id) ?? []
+        sendToTab(tabId, { type: 'remote:models_result', models })
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e)
+        sendToTab(tabId, { type: 'remote:models_result', models: [], error })
+      }
       return
     }
 

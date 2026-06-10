@@ -1,5 +1,5 @@
 import type { ToolCall } from '@kessler/gemma-agent'
-import type { ModelId } from './models'
+import type { ModelId, RemoteEndpointConfig } from './models'
 
 // Content Script -> Service Worker
 export type ChatSettings = {
@@ -70,6 +70,27 @@ export type ModelStatusMessage = {
 export type ModelSwitchMessage = {
   type: 'model:switch'
   modelId: ModelId
+  remoteConfig?: RemoteEndpointConfig
+}
+
+// Content Script -> Service Worker: persist the remote endpoint settings
+export type RemoteConfigUpdateMessage = {
+  type: 'remote:config'
+  config: RemoteEndpointConfig
+}
+
+// Content Script -> Service Worker: fetch available models from a remote endpoint
+export type RemoteFetchModelsMessage = {
+  type: 'remote:fetch_models'
+  baseUrl: string
+  apiKey: string
+}
+
+// Service Worker -> Content Script: result of a models fetch
+export type RemoteModelsResultMessage = {
+  type: 'remote:models_result'
+  models: string[]
+  error?: string
 }
 
 // Service Worker -> Offscreen Document
@@ -84,6 +105,7 @@ export type AgentRunMessage = {
 export type ModelLoadMessage = {
   type: 'model:load'
   modelId?: ModelId
+  remoteConfig?: RemoteEndpointConfig
 }
 
 // Offscreen Document -> Service Worker
@@ -124,6 +146,7 @@ export type Message =
   | ChatOpenMessage
   | ChatStopMessage
   | SettingsUpdateMessage
+  | RemoteConfigUpdateMessage
   | ContextClearMessage
   | ToolResultMessage
   | AgentResponseMessage
@@ -139,3 +162,5 @@ export type Message =
   | OffscreenAgentChunkMessage
   | OffscreenModelStatusMessage
   | GPUWarningMessage
+  | RemoteFetchModelsMessage
+  | RemoteModelsResultMessage

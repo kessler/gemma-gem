@@ -1,10 +1,20 @@
 import type { Message } from '@/shared/messages'
 import { Agent, image, audio, maxTurns } from '@kessler/gemma-agent'
-import type { ToolDefinition, ToolResultValue } from '@kessler/gemma-agent'
+import type { ToolDefinition, ToolResultValue, ModelBackend } from '@kessler/gemma-agent'
 import { TOOL_DEFINITIONS, type ToolDefWithMedia } from '@/shared/tool-definitions'
 import { GemmaModelHost } from '@/offscreen/model-host'
+import { RemoteModelHost } from '@/offscreen/remote-model-host'
 import { log } from '@/shared/logger'
-import { DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
+import { DEFAULT_MODEL_ID, DEFAULT_REMOTE_CONFIG, isRemoteModel, type ModelId, type RemoteEndpointConfig } from '@/shared/models'
+
+/** Common surface both model backends expose to the offscreen agent loop. */
+interface AppModelHost extends ModelBackend {
+  load(modelId?: ModelId): Promise<void>
+  unload(): Promise<void>
+  getCurrentModelId(): ModelId | null
+  abort(): void
+  isLoaded(): boolean
+}
 
 function getCountry(): string {
   const locale = navigator.language || 'en-US'
@@ -82,16 +92,48 @@ async function runWebGPUDiagnostic() {
 
 log.info('Offscreen document initializing')
 
-// Model host — auto-load on startup
-const modelHost = new GemmaModelHost((status, progress, error) => {
-  chrome.runtime.sendMessage({
-    type: 'model:status',
-    status,
-    modelId: modelHost.getCurrentModelId() ?? undefined,
-    progress,
-    error,
-  } satisfies Message)
-})
+// Two interchangeable backends: in-browser WebGPU (Gemma) and a remote
+// OpenAI-compatible endpoint (LM Studio). `activeHost` points at whichever the
+// currently-selected model uses.
+function makeStatusCallback(getModelId: () => ModelId | null) {
+  return (status: 'loading' | 'ready' | 'error', progress?: number, error?: string) => {
+    chrome.runtime.sendMessage({
+      type: 'model:status',
+      status,
+      modelId: getModelId() ?? undefined,
+      progress,
+      error,
+    } satisfies Message)
+  }
+}
+
+const gemmaHost: GemmaModelHost = new GemmaModelHost(makeStatusCallback(() => gemmaHost.getCurrentModelId()))
+const remoteHost: RemoteModelHost = new RemoteModelHost(makeStatusCallback(() => remoteHost.getCurrentModelId()))
+
+let activeHost: AppModelHost = gemmaHost
+
+async function loadModel(modelId: ModelId, remoteConfig?: RemoteEndpointConfig): Promise<void> {
+  const useRemote = isRemoteModel(modelId)
+  const nextHost: AppModelHost = useRemote ? remoteHost : gemmaHost
+
+  // Free the other backend's resources when switching kinds.
+  if (activeHost !== nextHost && activeHost.isLoaded()) {
+    log.info('Switching backend — unloading previous host')
+    await activeHost.unload().catch(e => log.error('Unload failed:', e))
+  }
+  activeHost = nextHost
+
+  if (useRemote) {
+    remoteHost.configure(remoteConfig ?? DEFAULT_REMOTE_CONFIG)
+    await remoteHost.load(modelId)
+  } else {
+    const warning = await checkGPUCompatibility()
+    if (warning) {
+      chrome.runtime.sendMessage({ type: 'gpu:warning', text: warning } satisfies Message)
+    }
+    await gemmaHost.load(modelId)
+  }
+}
 
 // Pending tool results keyed by requestId
 const pendingToolResults = new Map<string, { resolve: (result: unknown) => void, timeoutId: number }>()
@@ -171,13 +213,9 @@ let currentTabId: number | null = null
 chrome.runtime.onMessage.addListener(async (message: Message) => {
   switch (message.type) {
     case 'model:load': {
-      const modelId = message.modelId ?? modelHost.getCurrentModelId() ?? DEFAULT_MODEL_ID
+      const modelId = message.modelId ?? activeHost.getCurrentModelId() ?? DEFAULT_MODEL_ID
       try {
-        const warning = await checkGPUCompatibility()
-        if (warning) {
-          chrome.runtime.sendMessage({ type: 'gpu:warning', text: warning } satisfies Message)
-        }
-        await modelHost.load(modelId)
+        await loadModel(modelId, message.remoteConfig)
       } catch (e) {
         log.error('Model load failed:', e)
       }
@@ -185,7 +223,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
     }
 
     case 'model:switch': {
-      const { modelId } = message
+      const { modelId, remoteConfig } = message
       log.info('Switching model to:', modelId)
       if (currentAgent) {
         currentAgent.clearHistory()
@@ -193,7 +231,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
       currentAgent = null
       currentTabId = null
       // Storage persistence is handled by the background service worker
-      modelHost.load(modelId).catch(e => log.error('Model switch failed:', e))
+      loadModel(modelId, remoteConfig).catch(e => log.error('Model switch failed:', e))
       break
     }
 
@@ -218,7 +256,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
 
     case 'chat:stop': {
       log.info('Generation stopped by user')
-      modelHost.abort()
+      activeHost.abort()
       if (currentAgent) {
         currentAgent.abort()
       }
@@ -234,7 +272,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
     }
 
     case 'agent:run': {
-      if (!modelHost.isLoaded()) {
+      if (!activeHost.isLoaded()) {
         chrome.runtime.sendMessage({
           type: 'agent:response',
           tabId: message.tabId,
@@ -252,7 +290,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
       if (currentTabId !== tabId || !currentAgent) {
         log.info('Creating new agent for tab', tabId)
         currentAgent = new Agent({
-          model: modelHost,
+          model: activeHost,
           tools: createTools(tabId),
           systemPrompt: buildSystemPrompt(pageContext),
           historyStrategy: maxTurns(1000),

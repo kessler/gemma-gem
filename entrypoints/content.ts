@@ -1,10 +1,27 @@
-import { createGemIcon, updateGemProgress, setGemDisabled } from '@/content/gem-icon'
+import {
+  createGemIcon,
+  updateGemProgress,
+  setGemDisabled,
+  setGemHidden,
+  getGemIconPosition,
+  moveGemIconBy,
+  GEM_ICON_SIZE,
+  type IconPosition,
+} from '@/content/gem-icon'
 import { ChatOverlay } from '@/content/chat-overlay'
 import type { ChatSettings } from '@/content/chat-overlay'
 import { executeContentTool } from '@/content/tool-executors'
 import type { Message } from '@/shared/messages'
 import type { ToolCall } from '@kessler/gemma-agent'
-import { MODELS, STORAGE_KEY_MODEL, DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
+import {
+  MODELS,
+  STORAGE_KEY_MODEL,
+  STORAGE_KEY_REMOTE,
+  DEFAULT_MODEL_ID,
+  DEFAULT_REMOTE_CONFIG,
+  type ModelId,
+  type RemoteEndpointConfig,
+} from '@/shared/models'
 import {
   DEFAULT_SHORTCUTS,
   STORAGE_KEY_SHORTCUTS,
@@ -13,6 +30,9 @@ import {
 } from '@/shared/shortcuts'
 
 const STORAGE_KEY = 'gemma_disabled_sites'
+const STORAGE_KEY_ICON_POS = 'gemma_icon_position'
+const STORAGE_KEY_CHAT_SIZE = 'gemma_chat_size'
+const SESSION_KEY_ICON_HIDDEN = 'gemma_icon_hidden'
 const PAGE_SNAPSHOT_MAX_LENGTH = 8000
 
 function capturePageSnapshot(): string {
@@ -51,6 +71,51 @@ async function setDisabledForSite(disabled: boolean): Promise<void> {
   await browser.storage.local.set({ [STORAGE_KEY]: sites })
 }
 
+async function loadIconPosition(): Promise<IconPosition | null> {
+  const data = await browser.storage.local.get(STORAGE_KEY_ICON_POS)
+  const pos = data[STORAGE_KEY_ICON_POS]
+  return pos && typeof pos.left === 'number' && typeof pos.top === 'number' ? pos : null
+}
+
+async function saveIconPosition(pos: IconPosition): Promise<void> {
+  await browser.storage.local.set({ [STORAGE_KEY_ICON_POS]: pos })
+}
+
+async function loadChatSize(): Promise<{ width: number; height: number } | null> {
+  const data = await browser.storage.local.get(STORAGE_KEY_CHAT_SIZE)
+  const s = data[STORAGE_KEY_CHAT_SIZE] as { width: number; height: number } | undefined
+  return s && typeof s.width === 'number' && typeof s.height === 'number' ? s : null
+}
+
+async function saveChatSize(width: number, height: number): Promise<void> {
+  await browser.storage.local.set({ [STORAGE_KEY_CHAT_SIZE]: { width, height } })
+}
+
+// Per-session "hide icon" flag, scoped per hostname. Stored in session storage
+// so it clears on browser restart but survives page reloads within the session.
+async function isIconHiddenThisSession(): Promise<boolean> {
+  const session = browser.storage.session
+  if (!session) return false
+  const data = await session.get(SESSION_KEY_ICON_HIDDEN)
+  const hosts: string[] = data[SESSION_KEY_ICON_HIDDEN] ?? []
+  return hosts.includes(getSiteKey())
+}
+
+async function setIconHiddenThisSession(hidden: boolean): Promise<void> {
+  const session = browser.storage.session
+  if (!session) return
+  const data = await session.get(SESSION_KEY_ICON_HIDDEN)
+  const hosts: string[] = data[SESSION_KEY_ICON_HIDDEN] ?? []
+  const site = getSiteKey()
+  if (hidden && !hosts.includes(site)) {
+    hosts.push(site)
+  } else if (!hidden) {
+    const idx = hosts.indexOf(site)
+    if (idx !== -1) hosts.splice(idx, 1)
+  }
+  await session.set({ [SESSION_KEY_ICON_HIDDEN]: hosts })
+}
+
 async function loadShortcuts(): Promise<ShortcutsConfig> {
   const data = await browser.storage.local.get(STORAGE_KEY_SHORTCUTS)
   // Merge over defaults so a stored partial/legacy value can't drop a binding.
@@ -69,7 +134,16 @@ export default defineContentScript({
     const modelData = await browser.storage.local.get(STORAGE_KEY_MODEL)
     const initialModelId: ModelId = modelData[STORAGE_KEY_MODEL] ?? DEFAULT_MODEL_ID
 
+    const remoteData = await browser.storage.local.get(STORAGE_KEY_REMOTE)
+    const initialRemoteConfig: RemoteEndpointConfig = {
+      ...DEFAULT_REMOTE_CONFIG,
+      ...(remoteData[STORAGE_KEY_REMOTE] ?? {}),
+    }
+
     let shortcuts = await loadShortcuts()
+    const initialIconPosition = await loadIconPosition()
+    const initialChatSize = await loadChatSize()
+    let iconHiddenThisSession = await isIconHiddenThisSession()
 
     function safeSend(message: Message): void {
       try {
@@ -103,6 +177,12 @@ export default defineContentScript({
       onSettingsChange(settings: ChatSettings) {
         safeSend({ type: 'settings:update', settings } as any)
       },
+      onNewChat() {
+        stopped = false
+        modelReady = false
+        shownLoadingMessage = false
+        safeSend({ type: 'context:clear' } as any)
+      },
       onClearContext() {
         safeSend({ type: 'context:clear' } as any)
       },
@@ -112,45 +192,114 @@ export default defineContentScript({
         chat.hide()
         setGemDisabled(true)
       },
-      onModelSwitch(modelId: ModelId) {
+      onToggleIconHidden() {
+        iconHiddenThisSession = !iconHiddenThisSession
+        setGemHidden(iconHiddenThisSession)
+        setIconHiddenThisSession(iconHiddenThisSession)
+        chat.setIconHidden(iconHiddenThisSession)
+      },
+      onModelSwitch(modelId: ModelId, remoteConfig?: RemoteEndpointConfig) {
+        currentModelId = modelId
         chat.setInputEnabled(false)
         chat.setModelSwitchEnabled(false)
         chat.addMessage(`Switching to ${MODELS[modelId].label}...`, 'agent')
         modelReady = false
         shownLoadingMessage = false
-        safeSend({ type: 'model:switch', modelId })
+        safeSend({ type: 'model:switch', modelId, remoteConfig })
+      },
+      onRemoteConfigChange(config: RemoteEndpointConfig) {
+        safeSend({ type: 'remote:config', config } as any)
       },
       onShortcutsChange(next: ShortcutsConfig) {
         shortcuts = next
         saveShortcuts(next)
       },
+      onChatDrag(dx, dy) {
+        if (!iconHiddenThisSession) moveGemIconBy(dx, dy)
+      },
+      onChatDragEnd() {
+        if (iconHiddenThisSession) return
+        const pos = getGemIconPosition()
+        if (pos) saveIconPosition(pos)
+      },
+      onFetchModels(baseUrl, apiKey) {
+        safeSend({ type: 'remote:fetch_models', baseUrl, apiKey } as any)
+      },
+      onResize(width, height) {
+        saveChatSize(width, height)
+      },
     })
 
+    chat.setRemoteConfig(initialRemoteConfig)
     chat.setSelectedModel(initialModelId)
     chat.setShortcuts(shortcuts)
+    chat.setIconHidden(iconHiddenThisSession)
+    if (initialChatSize) chat.setSize(initialChatSize.width, initialChatSize.height)
 
     let modelReady = false
     let shownLoadingMessage = false
     let stopped = false
+    let currentModelId: ModelId = initialModelId
 
-    const icon = createGemIcon(() => {
-      if (siteDisabled) {
-        if (confirm('Re-enable Gemma Gem on this site?')) {
-          siteDisabled = false
-          setDisabledForSite(false)
-          setGemDisabled(false)
+    // Tracks the icon's position between consecutive live drag events so the
+    // chat window can follow by the same delta. Reset when a drag ends.
+    let iconDragPrev: IconPosition | null = null
+
+    const icon = createGemIcon({
+      onClick() {
+        if (siteDisabled) {
+          if (confirm('Re-enable Gemma Gem on this site?')) {
+            siteDisabled = false
+            setDisabledForSite(false)
+            setGemDisabled(false)
+          }
+          return
         }
-        return
-      }
-      chat.toggle()
-      safeSend({ type: 'chat:open' })
+        openOrToggleChat()
+      },
+      onMove(pos) {
+        saveIconPosition(pos)
+        iconDragPrev = null
+      },
+      onDrag(pos) {
+        if (iconDragPrev && chat.isVisible()) {
+          chat.moveBy(pos.left - iconDragPrev.left, pos.top - iconDragPrev.top)
+        }
+        iconDragPrev = pos
+      },
+      initialPosition: initialIconPosition,
     })
+
+    // Open the chat anchored to the icon: above it when there's room, otherwise
+    // below. Both are then kept in sync by the drag handlers above.
+    function placeChatNearIcon(): void {
+      const el = document.getElementById('gemma-gem-icon')
+      if (!el || el.style.display === 'none') return
+      const pos = getGemIconPosition()
+      if (!pos) return
+      const { width: chatW, height: chatH } = chat.getSize()
+      const gap = 12
+      const left = pos.left + GEM_ICON_SIZE - chatW
+      const above = pos.top - chatH - gap
+      const top = above >= 0 ? above : pos.top + GEM_ICON_SIZE + gap
+      chat.moveTo(left, top)
+    }
+
+    function openOrToggleChat(): void {
+      const willOpen = !chat.isVisible()
+      if (willOpen) placeChatNearIcon()
+      chat.toggle()
+      if (chat.isVisible()) safeSend({ type: 'chat:open' })
+    }
 
     document.body.appendChild(icon)
     document.body.appendChild(chat.getElement())
 
     if (siteDisabled) {
       setGemDisabled(true)
+    }
+    if (iconHiddenThisSession) {
+      setGemHidden(true)
     }
 
     // Capture phase so the shortcut wins even when focus is in the chat input
@@ -165,8 +314,7 @@ export default defineContentScript({
         if (siteDisabled) return
         e.preventDefault()
         e.stopPropagation()
-        chat.toggle()
-        if (chat.isVisible()) safeSend({ type: 'chat:open' })
+        openOrToggleChat()
         return
       }
       // Close chat overlay (default Escape)
@@ -210,15 +358,22 @@ export default defineContentScript({
 
         case 'model:status':
           if (message.status === 'loading') {
+            const modelId = message.modelId ?? currentModelId
+            const modelConfig = MODELS[modelId]
+            const remote = modelConfig.remote === true
             const pct = message.progress != null ? Math.round(message.progress) : 0
-            updateGemProgress(pct)
-            chat.updateStatus(`Loading model... ${pct}%`)
+            updateGemProgress(remote ? -1 : pct)
+            chat.updateStatus(remote ? 'Connecting...' : `Loading model... ${pct}%`)
             chat.setInputEnabled(false)
             chat.setModelSwitchEnabled(false)
             if (!shownLoadingMessage) {
               shownLoadingMessage = true
-              const modelConfig = MODELS[message.modelId ?? initialModelId]
-              chat.addMessage(`Downloading ${modelConfig.label}... This may take a moment on first run (${modelConfig.downloadSize}, cached after).`, 'agent')
+              chat.addMessage(
+                remote
+                  ? `Connecting to ${modelConfig.label} endpoint...`
+                  : `Downloading ${modelConfig.label}... This may take a moment on first run (${modelConfig.downloadSize}, cached after).`,
+                'agent',
+              )
             }
           } else if (message.status === 'ready') {
             updateGemProgress(-1)
@@ -226,6 +381,7 @@ export default defineContentScript({
             chat.setInputEnabled(true)
             chat.setModelSwitchEnabled(true)
             if (message.modelId) {
+              currentModelId = message.modelId
               chat.setSelectedModel(message.modelId)
             }
             if (!modelReady) {
@@ -237,6 +393,10 @@ export default defineContentScript({
             chat.updateStatus(`Error: ${message.error}`)
             chat.setModelSwitchEnabled(true)
           }
+          break
+
+        case 'remote:models_result':
+          chat.setModels(message.models, message.error)
           break
       }
     })

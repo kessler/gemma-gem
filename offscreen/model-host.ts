@@ -9,27 +9,7 @@ import type { ModelBackend, GenerateOptions } from '@kessler/gemma-agent'
 import { ToolResultImage, ToolResultAudio } from '@kessler/gemma-agent'
 import { log } from '@/shared/logger'
 import { MODELS, DEFAULT_MODEL_ID, type ModelId } from '@/shared/models'
-
-const SPECIAL_TOKENS = new Set([
-  '<eos>', '<bos>', '<end_of_turn>', '<start_of_turn>',
-  '<|turn>', '<turn|>',
-  '<|tool>', '<tool|>',
-  '<|tool_call>', '<tool_call|>',
-  '<|tool_response>', '<tool_response|>',
-  '<|channel>', '<channel|>',
-  '<|think|>', '<|image|>',
-  '<|"|>',
-])
-
-function stripSpecialTokens(text: string): string {
-  let result = text
-  for (const token of SPECIAL_TOKENS) {
-    if (result.includes(token)) {
-      result = result.split(token).join('')
-    }
-  }
-  return result
-}
+import { GemmaStreamFilter } from '@/offscreen/stream-filter'
 
 // Configure ONNX Runtime to load backend files locally instead of from CDN
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('ort/')
@@ -174,43 +154,16 @@ export class GemmaModelHost implements ModelBackend {
     }
 
     log.debug('Step 2: creating streamer')
-    let rawResult = ''
-    let insideThinking = false
-    let insideToolCall = false
+    const filter = new GemmaStreamFilter({
+      onChunk: options?.onChunk,
+      onThinkingChunk: options?.onThinkingChunk,
+    })
     let streamer: InstanceType<typeof TextStreamer>
     try {
       streamer = new TextStreamer(this.processor.tokenizer, {
         skip_prompt: true,
         skip_special_tokens: false,
-        callback_function: (text: string) => {
-          rawResult += text
-
-          // Track thinking blocks
-          if (text.includes('<|channel>')) {
-            insideThinking = true
-            return
-          }
-          if (text.includes('<channel|>')) {
-            insideThinking = false
-            return
-          }
-          if (insideThinking) {
-            const clean = text.replace(/^thought\n?/, '')
-            if (clean) options?.onThinkingChunk?.(clean)
-            return
-          }
-
-          // Track tool call blocks
-          if (text.includes('<|tool_call>')) insideToolCall = true
-          if (text.includes('<tool_call|>') || text.includes('<tool_response|>')) {
-            insideToolCall = false
-            return
-          }
-          if (insideToolCall || text.includes('<|tool_response>')) return
-
-          const clean = stripSpecialTokens(text)
-          if (clean) options?.onChunk?.(clean)
-        },
+        callback_function: (text: string) => filter.push(text),
       })
     } catch (e) {
       log.error('FAILED at streamer creation:', e)
@@ -235,7 +188,7 @@ export class GemmaModelHost implements ModelBackend {
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         log.info('Generation aborted by user')
-        return rawResult
+        return filter.result
       }
       log.error('FAILED at model.generate():', e)
       throw e
@@ -248,8 +201,8 @@ export class GemmaModelHost implements ModelBackend {
       }
     }
 
-    log.debug('Raw output:', rawResult.slice(0, 300))
-    return rawResult
+    log.debug('Raw output:', filter.result.slice(0, 300))
+    return filter.result
   }
 
   contextLimit = 128_000

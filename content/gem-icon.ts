@@ -67,10 +67,42 @@ function createProgressRing(): SVGSVGElement {
   return svg
 }
 
-export function createGemIcon(onClick: () => void): HTMLElement {
+export interface IconPosition {
+  /** Distance from the left edge of the viewport, in px. */
+  left: number
+  /** Distance from the top edge of the viewport, in px. */
+  top: number
+}
+
+export interface GemIconOptions {
+  onClick: () => void
+  /** Called with the new position after the user finishes dragging the icon. */
+  onMove?: (pos: IconPosition) => void
+  /** Called continuously with the live position while the icon is being dragged. */
+  onDrag?: (pos: IconPosition) => void
+  /** Restore a previously-saved position. Falls back to the bottom-right corner. */
+  initialPosition?: IconPosition | null
+}
+
+/** Width/height of the icon's hit area, in px. */
+export const GEM_ICON_SIZE = PROGRESS_SIZE
+
+/** Keep a position fully inside the current viewport. */
+function clampToViewport(left: number, top: number): IconPosition {
+  const maxLeft = Math.max(0, window.innerWidth - PROGRESS_SIZE)
+  const maxTop = Math.max(0, window.innerHeight - PROGRESS_SIZE)
+  return {
+    left: Math.min(Math.max(0, left), maxLeft),
+    top: Math.min(Math.max(0, top), maxTop),
+  }
+}
+
+export function createGemIcon(options: GemIconOptions): HTMLElement {
+  const { onClick, onMove, onDrag, initialPosition } = options
+
   const container = document.createElement('div')
   container.id = 'gemma-gem-icon'
-  container.title = 'Gemma Gem'
+  container.title = 'Gemma Gem — drag to move'
 
   Object.assign(container.style, {
     position: 'fixed',
@@ -88,7 +120,17 @@ export function createGemIcon(onClick: () => void): HTMLElement {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    touchAction: 'none',
   })
+
+  // Apply a saved position (switch from bottom/right anchoring to top/left).
+  if (initialPosition) {
+    const { left, top } = clampToViewport(initialPosition.left, initialPosition.top)
+    container.style.left = `${left}px`
+    container.style.top = `${top}px`
+    container.style.right = 'auto'
+    container.style.bottom = 'auto'
+  }
 
   // Gem SVG centered
   const gemWrapper = document.createElement('div')
@@ -99,6 +141,7 @@ export function createGemIcon(onClick: () => void): HTMLElement {
     justifyContent: 'center',
     position: 'relative',
     zIndex: '1',
+    pointerEvents: 'none',
   })
   container.appendChild(gemWrapper)
 
@@ -116,9 +159,102 @@ export function createGemIcon(onClick: () => void): HTMLElement {
     container.style.boxShadow = '0 2px 12px rgba(139, 92, 246, 0.3)'
   })
 
-  container.addEventListener('click', onClick)
+  // ---- Drag handling -------------------------------------------------------
+  // A press that moves more than DRAG_THRESHOLD px becomes a drag; otherwise it
+  // is treated as a click. `suppressClick` stops the trailing click event from
+  // toggling the chat after a drag.
+  const DRAG_THRESHOLD = 4
+  let pointerDown = false
+  let dragging = false
+  let suppressClick = false
+  let startX = 0
+  let startY = 0
+  let grabOffsetX = 0
+  let grabOffsetY = 0
+
+  const onPointerMove = (e: PointerEvent) => {
+    if (!pointerDown) return
+    const dx = e.clientX - startX
+    const dy = e.clientY - startY
+    if (!dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+
+    dragging = true
+    container.style.transition = 'none'
+    const { left, top } = clampToViewport(e.clientX - grabOffsetX, e.clientY - grabOffsetY)
+    container.style.left = `${left}px`
+    container.style.top = `${top}px`
+    container.style.right = 'auto'
+    container.style.bottom = 'auto'
+    onDrag?.({ left, top })
+  }
+
+  const onPointerUp = (e: PointerEvent) => {
+    if (!pointerDown) return
+    pointerDown = false
+    document.removeEventListener('pointermove', onPointerMove, true)
+    document.removeEventListener('pointerup', onPointerUp, true)
+    container.style.transition = 'transform 0.2s, box-shadow 0.2s'
+
+    if (dragging) {
+      dragging = false
+      suppressClick = true
+      const { left, top } = clampToViewport(e.clientX - grabOffsetX, e.clientY - grabOffsetY)
+      onMove?.({ left, top })
+    }
+  }
+
+  container.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return
+    pointerDown = true
+    dragging = false
+    suppressClick = false
+    startX = e.clientX
+    startY = e.clientY
+    const rect = container.getBoundingClientRect()
+    grabOffsetX = e.clientX - rect.left
+    grabOffsetY = e.clientY - rect.top
+    document.addEventListener('pointermove', onPointerMove, true)
+    document.addEventListener('pointerup', onPointerUp, true)
+  })
+
+  container.addEventListener('click', (e) => {
+    if (suppressClick) {
+      suppressClick = false
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    onClick()
+  })
 
   return container
+}
+
+/** Show or hide the gem icon (used for the per-session hide). */
+export function setGemHidden(hidden: boolean): void {
+  const container = document.getElementById('gemma-gem-icon')
+  if (container) container.style.display = hidden ? 'none' : 'flex'
+}
+
+/** Current top-left of the icon in the viewport, or null if it isn't mounted. */
+export function getGemIconPosition(): IconPosition | null {
+  const container = document.getElementById('gemma-gem-icon')
+  if (!container) return null
+  const rect = container.getBoundingClientRect()
+  return { left: rect.left, top: rect.top }
+}
+
+/** Nudge the icon by a delta, clamped to the viewport. Returns the new position. */
+export function moveGemIconBy(dx: number, dy: number): IconPosition | null {
+  const container = document.getElementById('gemma-gem-icon')
+  if (!container) return null
+  const rect = container.getBoundingClientRect()
+  const pos = clampToViewport(rect.left + dx, rect.top + dy)
+  container.style.left = `${pos.left}px`
+  container.style.top = `${pos.top}px`
+  container.style.right = 'auto'
+  container.style.bottom = 'auto'
+  return pos
 }
 
 export function setGemDisabled(disabled: boolean): void {
