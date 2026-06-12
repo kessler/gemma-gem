@@ -52,12 +52,39 @@ Offscreen Document          Service Worker           Content Script
 
 Click the gear icon in the chat header:
 
-- **Model**: Switch between Gemma 4 E2B (~500MB) and E4B (~1.5GB). Selection persists across sessions.
+- **Model**: Switch between Gemma 4 E2B (~500MB), E4B (~1.5GB), or **LM Studio (local)** — a model served by a local OpenAI-compatible endpoint over a link (see below). Selection persists across sessions.
 - **Thinking**: Toggle native Gemma 4 thinking
 - **Max iterations**: Cap on tool call loops per request
 - **Shortcuts**: Rebind the keyboard shortcuts that toggle and close the chat. Click a shortcut field, press the key combination you want, and it's saved. The `↺` button resets a shortcut to its default. Defaults: **Alt+G** toggles the chat, **Escape** closes it. Bindings persist across sessions.
 - **Clear context**: Reset conversation history for the current page
+- **Hide gem icon (this session)**: Temporarily hide the floating icon for the current site. It stays hidden across page reloads but reappears after a browser restart. While hidden, reopen the chat with the toggle shortcut (default **Alt+G**), then click **Show gem icon** to bring it back.
 - **Disable on this site**: Disable the extension per-hostname (persisted)
+
+The floating gem icon is also **draggable** — press and drag it anywhere on the page. Its position is remembered across pages and sessions. A quick click still opens the chat; only a real drag moves it.
+
+The chat window opens **anchored to the icon** and is itself **movable** — drag it by its header (the title bar). The icon and window stay linked: moving either one moves the other, so the whole assistant travels together. The position is remembered across pages and sessions.
+
+## Using a local model via LM Studio (link)
+
+Instead of running Gemma in-browser via WebGPU, you can point Gemma Gem at a local
+OpenAI-compatible server such as [LM Studio](https://lmstudio.ai). This offloads
+inference to the LM Studio process (which can use larger models / different
+hardware) while keeping everything on your machine.
+
+1. In LM Studio, download and load a model. A **Gemma** model is recommended —
+   the agent uses Gemma's chat + tool-call format, so tool use works best with a
+   Gemma model. (Plain chat works with any model.)
+2. Open the **Developer** tab and **Start Server** (default `http://localhost:1234`).
+3. In Gemma Gem's gear-icon settings, set **Model** to **LM Studio (local)**. A small
+   panel appears:
+   - **Endpoint URL** — the server base URL ending in `/v1` (default `http://localhost:1234/v1`).
+   - **Model name** — optional; leave blank to use LM Studio's currently-loaded model.
+   - **API key** — optional; only needed for endpoints that require a bearer token.
+   - **Context limit** — token budget used for history management (match your model's context).
+
+The settings persist across sessions. Switching back to a Gemma WebGPU model is one
+dropdown change away. Note: image/audio tools (screenshots) are only supported on the
+in-browser WebGPU backend, not over the LM Studio link.
 
 ## Keyboard Shortcuts
 

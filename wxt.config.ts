@@ -5,8 +5,11 @@ import { createRequire } from 'node:module'
 
 function copyOrtFiles() {
   const require = createRequire(import.meta.url)
-  // Resolve via an exported file, then walk up to the package root
-  const ortEntry = require.resolve('onnxruntime-web')
+  // onnxruntime-web is a transitive dependency of @huggingface/transformers, so
+  // resolve it relative to that package. This works under pnpm's nested layout
+  // (where transitive deps are not hoisted to the top-level node_modules).
+  const transformersEntry = require.resolve('@huggingface/transformers')
+  const ortEntry = createRequire(transformersEntry).resolve('onnxruntime-web')
   const ortDist = resolve(dirname(ortEntry))
   const destDir = resolve('public/ort')
   mkdirSync(destDir, { recursive: true })
