@@ -271,13 +271,10 @@ export class GemmaModelHost implements ModelBackend {
         return rawResult
       }
       const errMsg = e instanceof Error ? e.message : String(e)
-      if (errMsg.includes('unaligned') && this.device === 'webgpu') {
-        log.error('WebGPU alignment error detected — suggest WASM fallback:', errMsg)
-        throw new Error(
-          `WebGPU ha rilevato un errore di allineamento memoria (unaligned access) sul tuo dispositivo. ` +
-          `Prova a ricaricare l'estensione o contatta lo sviluppatore. ` +
-          `Dettaglio: ${errMsg}`
-        )
+      if (errMsg.includes('unaligned')) {
+        log.warn('Unaligned access error during generation:', errMsg)
+        // Re-throw so the caller (main.ts) can initiate a WASM fallback
+        throw new Error(`unaligned:${errMsg}`)
       }
       log.error('FAILED at model.generate():', e)
       throw e

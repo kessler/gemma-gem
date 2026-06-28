@@ -332,23 +332,82 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
         currentTabId = tabId
       }
 
-      currentAgent.run(userMessage).then((result) => {
-        log.info('Agent done. Iterations:', result.iterations, 'Tool calls:', result.toolCallCount)
-        log.debug('Response:', result.response.slice(0, 200))
-        chrome.runtime.sendMessage({
-          type: 'agent:response',
-          tabId,
-          text: result.response,
-        } satisfies Message)
-      }).catch((err) => {
-        log.error('Agent error:', err)
-        const message = err instanceof Error ? err.message : String(err)
-        chrome.runtime.sendMessage({
-          type: 'agent:response',
-          tabId,
-          text: `Something went wrong: ${message}`,
-        } satisfies Message)
-      })
+      const runAgent = async (retryOnUnaligned: boolean): Promise<void> => {
+        try {
+          const result = await currentAgent!.run(userMessage)
+          log.info('Agent done. Iterations:', result.iterations, 'Tool calls:', result.toolCallCount)
+          log.debug('Response:', result.response.slice(0, 200))
+          chrome.runtime.sendMessage({
+            type: 'agent:response',
+            tabId,
+            text: result.response,
+          } satisfies Message)
+        } catch (err) {
+          log.error('Agent run error:', err)
+          const message = err instanceof Error ? err.message : String(err)
+
+          if (retryOnUnaligned && message.startsWith('unaligned:') && modelHost.getDevice() === 'webgpu') {
+            log.warn('Unaligned access on WebGPU — reloading with WASM and retrying...')
+            chrome.runtime.sendMessage({
+              type: 'agent:chunk',
+              tabId,
+              text: '\n\n_⚠️ Errore di allineamento WebGPU. Passo al backend WASM e riprovo..._\n\n',
+            } satisfies Message)
+
+            currentAgent = null
+            currentTabId = null
+            clearInactivityTimer()
+
+            const modelId = modelHost.getCurrentModelId() ?? modelHost.getLastModelId() ?? DEFAULT_MODEL_ID
+            await modelHost.unload()
+            await modelHost.load(modelId, 'wasm')
+
+            currentAgent = new Agent({
+              model: modelHost,
+              tools: createTools(tabId),
+              systemPrompt: buildSystemPrompt(pageContext),
+              historyStrategy: maxTurns(1000),
+              maxIterations,
+              thinking: enableThinking,
+              logger: log,
+              onThinkingChunk(text) {
+                chrome.runtime.sendMessage({
+                  type: 'agent:chunk',
+                  tabId,
+                  text: `[Thinking] ${text}`,
+                } satisfies Message)
+              },
+              onToolCall(call) {
+                log.info('Tool call:', call.name, JSON.stringify(call.arguments))
+                chrome.runtime.sendMessage({
+                  type: 'agent:chunk',
+                  tabId,
+                  text: `[Tool] ${call.name}(${JSON.stringify(call.arguments)})`,
+                } satisfies Message)
+              },
+              onChunk(text) {
+                chrome.runtime.sendMessage({
+                  type: 'agent:chunk',
+                  tabId,
+                  text,
+                } satisfies Message)
+              },
+            })
+            currentTabId = tabId
+
+            await runAgent(false)
+            return
+          }
+
+          chrome.runtime.sendMessage({
+            type: 'agent:response',
+            tabId,
+            text: `Something went wrong: ${message}`,
+          } satisfies Message)
+        }
+      }
+
+      runAgent(true).catch(e => log.error('Unhandled in runAgent:', e))
 
       break
     }
