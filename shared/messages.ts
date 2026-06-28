@@ -65,11 +65,13 @@ export type ModelStatusMessage = {
   modelId?: ModelId
   progress?: number
   error?: string
+  device?: string
 }
 
 export type ModelSwitchMessage = {
   type: 'model:switch'
   modelId: ModelId
+  device?: string
 }
 
 // Service Worker -> Offscreen Document
@@ -84,6 +86,7 @@ export type AgentRunMessage = {
 export type ModelLoadMessage = {
   type: 'model:load'
   modelId?: ModelId
+  device?: string
 }
 
 // Offscreen Document -> Service Worker
@@ -112,6 +115,7 @@ export type OffscreenModelStatusMessage = {
   modelId?: ModelId
   progress?: number
   error?: string
+  device?: string
 }
 
 export type GPUWarningMessage = {

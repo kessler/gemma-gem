@@ -14,6 +14,8 @@ function copyOrtFiles() {
   const files = [
     'ort-wasm-simd-threaded.asyncify.mjs',
     'ort-wasm-simd-threaded.asyncify.wasm',
+    'ort-wasm-simd-threaded.mjs',
+    'ort-wasm-simd-threaded.wasm',
   ]
 
   for (const file of files) {

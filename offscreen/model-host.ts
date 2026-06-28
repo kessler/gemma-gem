@@ -35,6 +35,7 @@ function stripSpecialTokens(text: string): string {
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('ort/')
 
 type StatusCallback = (status: 'loading' | 'ready' | 'error', progress?: number, error?: string) => void
+type DeviceType = 'webgpu' | 'wasm'
 
 export class GemmaModelHost implements ModelBackend {
   private model: InstanceType<typeof Gemma4ForConditionalGeneration> | null = null
@@ -45,18 +46,24 @@ export class GemmaModelHost implements ModelBackend {
   private loadingModelId: ModelId | null = null
   private onStatus: StatusCallback
   private abortController: AbortController | null = null
+  private device: DeviceType = 'webgpu'
 
   constructor(onStatus: StatusCallback) {
     this.onStatus = onStatus
   }
 
-  async load(modelId: ModelId = DEFAULT_MODEL_ID): Promise<void> {
-    log.info('load() called:', modelId, '| current:', this.currentModelId, '| hasModel:', !!this.model, '| loading:', this.loading)
-    if (this.model && this.currentModelId === modelId) {
+  getDevice(): DeviceType {
+    return this.device
+  }
+
+  async load(modelId: ModelId = DEFAULT_MODEL_ID, deviceOverride?: DeviceType): Promise<void> {
+    const targetDevice = deviceOverride ?? this.device
+    log.info('load() called:', modelId, 'device:', targetDevice, '| current:', this.currentModelId, '| hasModel:', !!this.model, '| loading:', this.loading)
+    if (this.model && this.currentModelId === modelId && (deviceOverride === undefined || deviceOverride === this.device)) {
       this.onStatus('ready')
       return
     }
-    if (this.model && this.currentModelId !== modelId) {
+    if (this.model) {
       log.info('Unloading current model before switching')
       await this.unload()
       log.info('Unload complete')
@@ -94,7 +101,7 @@ export class GemmaModelHost implements ModelBackend {
       const [model, processor] = await Promise.all([
         Gemma4ForConditionalGeneration.from_pretrained(config.hfModelId, {
           dtype: 'q4f16',
-          device: 'webgpu',
+          device: targetDevice,
           progress_callback,
         }),
         AutoProcessor.from_pretrained(config.hfModelId),
@@ -104,6 +111,7 @@ export class GemmaModelHost implements ModelBackend {
       this.processor = processor
       this.currentModelId = modelId
       this.lastModelId = modelId
+      this.device = targetDevice
       this.loadingModelId = null
       this.contextLimit = config.contextLimit
       this.loading = false
@@ -111,6 +119,25 @@ export class GemmaModelHost implements ModelBackend {
     } catch (e) {
       this.loading = false
       this.loadingModelId = null
+
+      if (targetDevice === 'webgpu') {
+        const errMsg = e instanceof Error ? e.message : String(e)
+        const isAlignmentError = errMsg.includes('unaligned')
+        log.warn(`WebGPU load failed${isAlignmentError ? ' (unaligned access)' : ''}, falling back to WASM:`, errMsg)
+        this.onStatus('loading', undefined)
+
+        try {
+          await this.load(modelId, 'wasm')
+          this.onStatus('ready')
+          log.info('WASM fallback succeeded')
+          return
+        } catch (fallbackErr) {
+          log.error('WASM fallback also failed:', fallbackErr)
+          this.onStatus('error', undefined, String(fallbackErr))
+          throw fallbackErr
+        }
+      }
+
       this.onStatus('error', undefined, String(e))
       throw e
     }
@@ -242,6 +269,15 @@ export class GemmaModelHost implements ModelBackend {
       if (e instanceof DOMException && e.name === 'AbortError') {
         log.info('Generation aborted by user')
         return rawResult
+      }
+      const errMsg = e instanceof Error ? e.message : String(e)
+      if (errMsg.includes('unaligned') && this.device === 'webgpu') {
+        log.error('WebGPU alignment error detected — suggest WASM fallback:', errMsg)
+        throw new Error(
+          `WebGPU ha rilevato un errore di allineamento memoria (unaligned access) sul tuo dispositivo. ` +
+          `Prova a ricaricare l'estensione o contatta lo sviluppatore. ` +
+          `Dettaglio: ${errMsg}`
+        )
       }
       log.error('FAILED at model.generate():', e)
       throw e

@@ -90,6 +90,7 @@ const modelHost = new GemmaModelHost((status, progress, error) => {
     modelId: modelHost.getCurrentModelId() ?? modelHost.getLastModelId() ?? undefined,
     progress,
     error,
+    device: modelHost.getDevice(),
   } satisfies Message)
 })
 
@@ -103,10 +104,11 @@ function resetInactivityTimer(): void {
     log.info('Inactivity timeout reached — unloading model')
     modelHost.unload()
     chrome.runtime.sendMessage({
-      type: 'model:status',
-      status: 'unloaded',
-      modelId: modelHost.getLastModelId() ?? undefined,
-    } satisfies Message)
+          type: 'model:status',
+          status: 'unloaded',
+          modelId: modelHost.getLastModelId() ?? undefined,
+          device: modelHost.getDevice(),
+        } satisfies Message)
   }, INACTIVITY_TIMEOUT)
 }
 
@@ -196,12 +198,13 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
   switch (message.type) {
     case 'model:load': {
       const modelId = message.modelId ?? modelHost.getCurrentModelId() ?? DEFAULT_MODEL_ID
+      const device = message.device as 'webgpu' | 'wasm' | undefined
       try {
         const warning = await checkGPUCompatibility()
-        if (warning) {
+        if (warning && (!device || device === 'webgpu')) {
           chrome.runtime.sendMessage({ type: 'gpu:warning', text: warning } satisfies Message)
         }
-        await modelHost.load(modelId)
+        await modelHost.load(modelId, device)
         resetInactivityTimer()
       } catch (e) {
         log.error('Model load failed:', e)
@@ -211,7 +214,8 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
 
     case 'model:switch': {
       const { modelId } = message
-      log.info('Switching model to:', modelId)
+      const device = message.device as 'webgpu' | 'wasm' | undefined
+      log.info('Switching model to:', modelId, device ? `device: ${device}` : '')
       resetInactivityTimer()
       if (currentAgent) {
         currentAgent.clearHistory()
@@ -219,7 +223,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
       currentAgent = null
       currentTabId = null
       // Storage persistence is handled by the background service worker
-      modelHost.load(modelId).catch(e => log.error('Model switch failed:', e))
+      modelHost.load(modelId, device).catch(e => log.error('Model switch failed:', e))
       break
     }
 
@@ -270,6 +274,7 @@ chrome.runtime.onMessage.addListener(async (message: Message) => {
           type: 'model:status',
           status: 'loading',
           modelId,
+          device: modelHost.getDevice(),
         } satisfies Message)
         try {
           await modelHost.load(modelId)
